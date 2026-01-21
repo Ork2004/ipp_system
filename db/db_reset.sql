@@ -155,6 +155,23 @@ ON generation_settings(excel_template_id, docx_template_id)
 WHERE is_active;
 
 -- =========================
+-- AUTH / USERS
+-- =========================
+CREATE TABLE users (
+    id BIGSERIAL PRIMARY KEY,
+    email TEXT UNIQUE,
+    username TEXT UNIQUE,
+    password_hash TEXT,          -- будет bcrypt
+    role TEXT NOT NULL,          -- 'admin' | 'teacher' | 'guest'
+    department_id BIGINT REFERENCES departments(id) ON DELETE SET NULL,
+    teacher_id BIGINT REFERENCES teachers(id) ON DELETE SET NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT now(),
+
+    CONSTRAINT ck_user_role CHECK (role IN ('admin','teacher','guest'))
+);
+
+-- =========================
 -- SEED
 -- =========================
 INSERT INTO departments (name)
@@ -169,6 +186,14 @@ VALUES (
     'PhD',
     'штатный'
 );
+INSERT INTO users (username, password_hash, role, department_id)
+VALUES ('dept_admin', '$2b$12$dLKdTeXx3.ny13U8EYMXtORgdUEkJ/c6Kit5j4vmlMDgO0cZt/9VS', 'admin', 1); --password: admin123
+
+INSERT INTO users (username, password_hash, role, teacher_id, department_id)
+VALUES ('teacher1', '$2b$12$O1M4JS.K7Mna4S78wf5h2eqIrhHgEyhxJrts0gojwDdB.buEjHPLW', 'teacher', 1, 1); --password: teacher123
+
+INSERT INTO users (username, password_hash, role)
+VALUES ('guest', '$2b$12$aH6n80.iAvKNHPHil0vFtOCKebIzsXxPeiQnKwzq7ZXCCaDoVbjMW', 'guest'); --password: guest123
 
 INSERT INTO placeholder_catalog (placeholder_name, placeholder_type, category, description, example) VALUES
 ('teacher.staff_type',      'text', 'teacher', 'Тип ставки/штатности', '{{ teacher.staff_type }}'),

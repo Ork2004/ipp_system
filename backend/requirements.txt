@@ -9,3 +9,6 @@ openpyxl
 
 python-docx
 docxtpl
+
+python-jose[cryptography]
+passlib[bcrypt]
