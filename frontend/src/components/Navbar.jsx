@@ -9,7 +9,6 @@ export default function Navbar() {
         <div className="navlinks">
           <NavLink to="/excel-upload" className={linkClass}>Нагрузка</NavLink>
           <NavLink to="/workload-data" className={linkClass}>Данные</NavLink>
-          <NavLink to="/placeholders" className={linkClass}>Плейсхолдеры</NavLink>
           <NavLink to="/docx-upload" className={linkClass}>DOCX</NavLink>
           <NavLink to="/settings" className={linkClass}>Настройка</NavLink>
           <NavLink to="/generate" className={linkClass}>Генерация</NavLink>
