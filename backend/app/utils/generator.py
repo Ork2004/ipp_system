@@ -122,7 +122,7 @@ def generate_docx_for_teacher(
             sem1_col = cols.get("sem1_col")
             sem2_col = cols.get("sem2_col")
             staff_hours_col = cols.get("staff_hours_col")
-            hourly_hours_cols = cols.get("hourly_hours_cols") or []
+            hourly_hours_col = cols.get("hourly_hours_col")
 
             required = [teacher_col, sem1_col, sem2_col, staff_hours_col]
             if not all(required):
@@ -150,10 +150,9 @@ def generate_docx_for_teacher(
                 return to_num(get_val(row_data, staff_hours_col))
 
             def hourly_val(row_data: dict) -> float:
-                s = 0.0
-                for c in hourly_hours_cols:
-                    s += to_num(get_val(row_data, c))
-                return s
+                if not hourly_hours_col:
+                    return 0.0
+                return to_num(get_val(row_data, hourly_hours_col))
 
             cur.execute("""
                 SELECT row_data

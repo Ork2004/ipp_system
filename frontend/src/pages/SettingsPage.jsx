@@ -1,12 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { useNavigate } from "react-router-dom";
+
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text || "");
+}
 
 export default function SettingsPage() {
+  const navigate = useNavigate();
+
   const [excelTemplateId, setExcelTemplateId] = useState(localStorage.getItem("excel_template_id") || "");
   const [docxTemplateId, setDocxTemplateId] = useState(localStorage.getItem("docx_template_id") || "");
 
   const [cols, setCols] = useState([]);
-  const [status, setStatus] = useState("");
+  const [settingsStatus, setSettingsStatus] = useState("");
 
   const [cfg, setCfg] = useState({
     columns: {
@@ -14,80 +21,127 @@ export default function SettingsPage() {
       sem1_col: "",
       sem2_col: "",
       staff_hours_col: "",
-      hourly_hours_cols: [],
+      hourly_hours_cols: "",
     }
   });
 
   async function loadColumns() {
     if (!excelTemplateId) {
-      setStatus("Нет excel_template_id");
+      setSettingsStatus("Нет excel_template_id");
       return;
     }
     try {
-      setStatus("Загрузка колонок Excel...");
+      setSettingsStatus("Загрузка колонок Excel...");
       const res = await api.get(`/excel/${excelTemplateId}/columns`);
       setCols(res.data || []);
-      setStatus("");
+      setSettingsStatus("");
     } catch (e) {
       console.error(e);
-      setStatus("Ошибка загрузки колонок");
+      setSettingsStatus("Ошибка загрузки колонок");
     }
   }
 
-  async function loadCurrent() {
+  async function loadCurrentSettings() {
     if (!excelTemplateId || !docxTemplateId) return;
     try {
       const res = await api.get("/settings/current", {
         params: { excel_template_id: excelTemplateId, docx_template_id: docxTemplateId }
       });
-      if (res.data?.exists) setCfg(res.data.config);
+
+      if (res.data?.exists) {
+        const loaded = res.data.config || {};
+        const c = loaded.columns || {};
+
+        let hourly = c.hourly_hours_cols;
+        if (Array.isArray(hourly)) hourly = hourly[0] || "";
+        if (hourly == null) hourly = "";
+
+        setCfg({
+          ...loaded,
+          columns: {
+            teacher_col: c.teacher_col || "",
+            sem1_col: c.sem1_col || "",
+            sem2_col: c.sem2_col || "",
+            staff_hours_col: c.staff_hours_col || "",
+            hourly_hours_cols: hourly || "",
+          }
+        });
+      }
     } catch (e) {
       console.error(e);
     }
   }
-
-  useEffect(() => {
-    loadColumns();
-    loadCurrent();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function setOne(key, value) {
     setCfg(prev => ({ ...prev, columns: { ...prev.columns, [key]: value } }));
   }
 
-  function toggleHourly(colName) {
-    setCfg(prev => {
-      const list = prev.columns.hourly_hours_cols || [];
-      const has = list.includes(colName);
-      const next = has ? list.filter(x => x !== colName) : [...list, colName];
-      return { ...prev, columns: { ...prev.columns, hourly_hours_cols: next } };
-    });
-  }
-
-  async function save() {
+  async function saveSettings() {
     if (!excelTemplateId || !docxTemplateId) {
-      setStatus("Нужно указать excel_template_id и docx_template_id");
+      setSettingsStatus("Нужно указать excel_template_id и docx_template_id");
       return;
     }
     const c = cfg.columns || {};
     if (!c.teacher_col || !c.sem1_col || !c.sem2_col || !c.staff_hours_col) {
-      setStatus("Обязательные: teacher_col, sem1_col, sem2_col, staff_hours_col");
+      setSettingsStatus("Обязательные: teacher_col, sem1_col, sem2_col, staff_hours_col");
       return;
     }
+
     try {
-      setStatus("Сохранение...");
+      setSettingsStatus("Сохранение...");
       const res = await api.post("/settings/save", {
         excel_template_id: Number(excelTemplateId),
         docx_template_id: Number(docxTemplateId),
         config: cfg
       });
-      setStatus(`Сохранено ✅ settings_id=${res.data.settings_id}`);
+      setSettingsStatus(`Сохранено ✅ settings_id=${res.data.settings_id}`);
     } catch (e) {
       console.error(e);
-      setStatus(e?.response?.data?.detail || "Ошибка сохранения");
+      setSettingsStatus(e?.response?.data?.detail || "Ошибка сохранения");
     }
   }
+
+  const [phData, setPhData] = useState({ stable: [], dynamic: [] });
+  const [phStatus, setPhStatus] = useState("");
+
+  const grouped = useMemo(() => {
+    const stableTeacher = (phData.stable || []).filter(i => i.category === "teacher");
+    const stableLoop = (phData.stable || []).filter(i => i.category === "loop");
+    const dynamicRow = phData.dynamic || [];
+    return { stableTeacher, stableLoop, dynamicRow };
+  }, [phData]);
+
+  async function loadPlaceholders() {
+    if (!excelTemplateId) {
+      setPhStatus("Нет excel_template_id. Сначала загрузи Excel.");
+      return;
+    }
+    try {
+      setPhStatus("Загрузка плейсхолдеров...");
+      const res = await api.get("/placeholders", { params: { excel_template_id: excelTemplateId } });
+      setPhData(res.data || { stable: [], dynamic: [] });
+      setPhStatus("");
+    } catch (e) {
+      console.error(e);
+      setPhStatus("Ошибка: плейсхолдеры не загрузились");
+    }
+  }
+
+  function persistExcelId(v) {
+    setExcelTemplateId(v);
+    localStorage.setItem("excel_template_id", v);
+  }
+  function persistDocxId(v) {
+    setDocxTemplateId(v);
+    localStorage.setItem("docx_template_id", v);
+  }
+
+  useEffect(() => {
+    loadColumns();
+    loadCurrentSettings();
+    loadPlaceholders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="container">
@@ -95,33 +149,38 @@ export default function SettingsPage() {
 
       <div className="card card-pad">
         <div className="section-title">IDs</div>
-
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
           <input
             className="input"
             style={{ width: 220 }}
             value={excelTemplateId}
-            onChange={(e) => {
-              setExcelTemplateId(e.target.value);
-              localStorage.setItem("excel_template_id", e.target.value);
-            }}
+            onChange={(e) => persistExcelId(e.target.value)}
             placeholder="excel_template_id"
           />
           <input
             className="input"
             style={{ width: 220 }}
             value={docxTemplateId}
-            onChange={(e) => {
-              setDocxTemplateId(e.target.value);
-              localStorage.setItem("docx_template_id", e.target.value);
-            }}
+            onChange={(e) => persistDocxId(e.target.value)}
             placeholder="docx_template_id"
           />
-          <button className="btn btn-outline" onClick={loadColumns}>Загрузить колонки</button>
-          <div className="small">{status}</div>
         </div>
 
         <div className="hr" />
+
+        <div className="section-title" style={{ marginTop: 14 }}>
+          Настройки генерации (пара Excel + DOCX)
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+          <button
+            className="btn btn-outline"
+            onClick={() => { loadColumns(); loadCurrentSettings(); }}
+          >
+            Обновить настройки
+          </button>
+          <div className="small">{settingsStatus}</div>
+        </div>
 
         <div className="section-title">Обязательные привязки (по column_name)</div>
 
@@ -150,45 +209,50 @@ export default function SettingsPage() {
           onChange={(v) => setOne("staff_hours_col", v)}
         />
 
-        <div className="hr" style={{ marginTop: 14 }} />
-
-        <div className="section-title">hourly_hours_cols (почасовые колонки)</div>
-        <div className="small" style={{ marginBottom: 10 }}>
-          Отметь какие column_name суммируются как почасовая нагрузка.
-        </div>
-
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>column_name</th>
-                <th>header_text</th>
-                <th style={{ width: 120 }}>Включить</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cols.map(c => (
-                <tr key={c.column_name}>
-                  <td style={{ fontWeight: 800 }}>{c.column_name}</td>
-                  <td>{c.header_text}</td>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={(cfg.columns.hourly_hours_cols || []).includes(c.column_name)}
-                      onChange={() => toggleHourly(c.column_name)}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <SelectRow
+          label="hourly_hours_cols (почасовая нагрузка)"
+          value={cfg.columns.hourly_hours_cols}
+          cols={cols}
+          onChange={(v) => setOne("hourly_hours_cols", v)}
+        />
 
         <div className="actions-row" style={{ marginTop: 16 }}>
           <div className="small">
-            Сохраняется на пару: Excel #{excelTemplateId} + DOCX #{docxTemplateId}
+            Сохраняется на пару: Excel #{excelTemplateId || "—"} + DOCX #{docxTemplateId || "—"}
           </div>
-          <button className="btn btn-primary" onClick={save}>СОХРАНИТЬ</button>
+          <button className="btn btn-primary" onClick={saveSettings}>СОХРАНИТЬ</button>
+        </div>
+
+        <div className="hr" style={{ marginTop: 18 }} />
+
+        <div className="section-title" style={{ marginTop: 14 }}>
+          Плейсхолдеры (Excel → row.*)
+        </div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
+          <button className="btn btn-outline" onClick={loadPlaceholders}>Обновить плейсхолдеры</button>
+          <div className="small">{phStatus}</div>
+        </div>
+
+        <div className="small" style={{ marginBottom: 14 }}>
+          Инструкция: открой DOCX в Word → вставь плейсхолдеры.
+          <br />
+          <b>Стабильные:</b> teacher.* и loops. <b>Динамичные:</b> row.* (строго из выбранного Excel).
+          <br />
+          После вставки перейди на вкладку <b>DOCX</b> и загрузи шаблон (он свяжется с этим Excel).
+        </div>
+
+        <Section title="Стабильные: teacher.*" items={grouped.stableTeacher} />
+        <Section title="Стабильные: loops" items={grouped.stableLoop} />
+        <Section title="Динамичные: row.* (из Excel)" items={grouped.dynamicRow} />
+
+        <div className="actions-row" style={{ marginTop: 16 }}>
+          <div className="small">
+            Stable: {(phData.stable || []).length} | Dynamic: {(phData.dynamic || []).length}
+          </div>
+          <button className="btn btn-primary" onClick={() => navigate("/docx-upload")}>
+            ДАЛЕЕ: ЗАГРУЗИТЬ DOCX
+          </button>
         </div>
       </div>
     </div>
@@ -207,6 +271,47 @@ function SelectRow({ label, value, cols, onChange }) {
           </option>
         ))}
       </select>
+    </div>
+  );
+}
+
+function Section({ title, items }) {
+  return (
+    <div style={{ marginTop: 18 }}>
+      <div className="section-title">{title}</div>
+
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Placeholder</th>
+              <th>Описание</th>
+              <th>Пример</th>
+              <th style={{ width: 120 }}>Действие</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.length === 0 ? (
+              <tr><td colSpan="4">Нет данных</td></tr>
+            ) : (
+              items.map((p) => (
+                <tr key={p.placeholder_name}>
+                  <td style={{ fontWeight: 800 }}>{p.placeholder_name}</td>
+                  <td>{p.description || ""}</td>
+                  <td style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}>
+                    {p.example || ""}
+                  </td>
+                  <td>
+                    <button className="btn btn-primary" onClick={() => copyToClipboard(p.example || "")}>
+                      Copy
+                    </button>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
