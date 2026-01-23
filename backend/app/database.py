@@ -1,6 +1,8 @@
 import os
 import psycopg2
 
+from dotenv import load_dotenv
+load_dotenv(encoding="utf-8")
 
 def get_connection():
     return psycopg2.connect(
