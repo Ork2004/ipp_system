@@ -172,6 +172,43 @@ CREATE TABLE users (
 );
 
 -- =========================
+-- GENERATION HISTORY
+-- =========================
+CREATE TABLE generation_history (
+    id BIGSERIAL PRIMARY KEY,
+
+    generated_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    generated_by_role TEXT NOT NULL,  -- admin|teacher
+    generated_for_teacher_id BIGINT REFERENCES teachers(id) ON DELETE SET NULL,
+
+    department_id BIGINT REFERENCES departments(id) ON DELETE SET NULL,
+    academic_year TEXT NOT NULL,
+
+    excel_template_id BIGINT REFERENCES excel_templates(id) ON DELETE SET NULL,
+    docx_template_id  BIGINT REFERENCES docx_templates(id) ON DELETE SET NULL,
+
+    output_path TEXT,
+    file_name TEXT,
+
+    status TEXT NOT NULL DEFAULT 'success', -- success|error
+    error_text TEXT,
+
+    created_at TIMESTAMPTZ DEFAULT now(),
+
+    CONSTRAINT ck_gen_hist_role CHECK (generated_by_role IN ('admin','teacher')),
+    CONSTRAINT ck_gen_hist_status CHECK (status IN ('success','error'))
+);
+
+CREATE INDEX ix_gen_hist_for_teacher_time
+ON generation_history(generated_for_teacher_id, created_at DESC);
+
+CREATE INDEX ix_gen_hist_by_user_time
+ON generation_history(generated_by_user_id, created_at DESC);
+
+CREATE INDEX ix_gen_hist_department_time
+ON generation_history(department_id, created_at DESC);
+
+-- =========================
 -- SEED
 -- =========================
 INSERT INTO departments (name)
