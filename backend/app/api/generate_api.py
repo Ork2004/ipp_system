@@ -1,10 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import FileResponse
 
+from backend.app.config import GENERATED_DIR
 from backend.app.utils.generator import generate_docx_for_teacher
 from backend.app.database import get_connection
 from backend.app.api.auth_api import get_current_user
 from backend.app.utils.generation_history import insert_generation_history
+from backend.app.utils.storage import safe_resolve_in_dir
 
 router = APIRouter(prefix="/generate", tags=["Generate"])
 
@@ -142,11 +144,9 @@ def generate_for_teacher(payload: dict, user=Depends(get_current_user)):
 
 @router.get("/download")
 def download_generated(path: str):
-    if "backend/uploads/generated" not in path.replace("\\", "/"):
-        raise HTTPException(status_code=400, detail="Недопустимый путь")
-
+    file_path = safe_resolve_in_dir(path, GENERATED_DIR)
     return FileResponse(
-        path,
+        str(file_path),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=path.split("/")[-1]
+        filename=file_path.name
     )

@@ -1,7 +1,38 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
 from backend.app.database import get_connection
+from backend.app.utils.excel_parser import parse_excel
+from backend.app.utils.storage import save_upload_file
+from backend.app.config import EXCEL_DIR
+from backend.app.api.auth_api import require_roles
 
 router = APIRouter(prefix="/excel", tags=["Excel"])
+
+
+@router.post("/upload")
+def upload_excel(
+    department_id: int = Form(...),
+    academic_year: str = Form(...),
+    file: UploadFile = File(...),
+    user=Depends(require_roles("admin"))
+):
+    saved_path = save_upload_file(file, EXCEL_DIR, allowed_exts={".xlsx", ".xls"})
+
+    excel_template_id = parse_excel(
+        saved_path,
+        department_id,
+        academic_year,
+        source_filename=file.filename
+    )
+
+    return {
+        "status": "ok",
+        "type": "excel",
+        "department_id": department_id,
+        "academic_year": academic_year,
+        "original_filename": file.filename,
+        "saved_path": saved_path,
+        "excel_template_id": excel_template_id
+    }
 
 
 @router.get("/templates")

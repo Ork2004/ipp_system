@@ -1,10 +1,11 @@
 import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import List
 
 from docxtpl import DocxTemplate
 
 from backend.app.database import get_connection
+from backend.app.config import GENERATED_DIR
 
 
 def to_num(x):
@@ -116,7 +117,7 @@ def generate_docx_for_teacher(
                 raise Exception("DOCX не связан с Excel (excel_template_id = NULL). Загрузи DOCX с выбранным Excel.")
 
             settings = _get_active_settings(cur, excel_template_id, docx_template_id)
-            cols = settings.get("columns") or {}
+            cols = (settings or {}).get("columns") or {}
 
             teacher_col = cols.get("teacher_col")
             sem1_col = cols.get("sem1_col")
@@ -173,7 +174,6 @@ def generate_docx_for_teacher(
 
                 s_val = staff_val(rd)
                 h_val = hourly_val(rd)
-
                 row_obj = _build_row_object(rd, col_to_header)
 
                 if has_sem(rd, sem1_col):
@@ -199,11 +199,8 @@ def generate_docx_for_teacher(
         tpl = DocxTemplate(tpl_path)
         tpl.render(context)
 
-        out_dir = Path("backend/uploads/generated")
-        out_dir.mkdir(parents=True, exist_ok=True)
-
         safe_name = re.sub(r"[^0-9A-Za-zА-Яа-я_]+", "_", teacher["full_name"]).strip("_")
-        output_path = str(out_dir / f"IPP_{safe_name}_{academic_year}.docx")
+        output_path = str((GENERATED_DIR / f"IPP_{safe_name}_{academic_year}.docx").resolve())
         tpl.save(output_path)
         return output_path
 

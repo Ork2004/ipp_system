@@ -22,7 +22,7 @@ export default function ExcelUploadPage() {
       form.append("academic_year", academicYear);
       form.append("file", file);
 
-      const res = await api.post("/upload/excel", form, {
+      const res = await api.post("/excel/upload", form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
