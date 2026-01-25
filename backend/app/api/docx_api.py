@@ -1,27 +1,15 @@
-import uuid
-from pathlib import Path
-
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import FileResponse
+from pathlib import Path
 
 from backend.app.database import get_connection
 from backend.app.utils.docx_store import store_docx_template
 from backend.app.utils.validator import validate_docx_against_excel
+from backend.app.utils.storage import save_upload_file, safe_resolve_in_dir
+from backend.app.config import DOCX_DIR
+from backend.app.api.auth_api import require_roles
 
 router = APIRouter(prefix="/docx", tags=["DOCX"])
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-DOCX_DIR = BASE_DIR / "uploads" / "docx"
-DOCX_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def _save_upload(upload_file: UploadFile) -> str:
-    ext = Path(upload_file.filename).suffix.lower()
-    file_id = uuid.uuid4().hex
-    out_path = DOCX_DIR / f"{file_id}{ext}"
-    with open(out_path, "wb") as f:
-        f.write(upload_file.file.read())
-    return str(out_path)
 
 
 @router.post("/upload")
@@ -29,11 +17,9 @@ def upload_docx(
     department_id: int = Form(...),
     academic_year: str = Form(...),
     excel_template_id: int = Form(...),
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    user=Depends(require_roles("admin"))
 ):
-    if not file.filename.lower().endswith(".docx"):
-        raise HTTPException(status_code=400, detail="Нужен DOCX файл .docx")
-
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -43,7 +29,7 @@ def upload_docx(
     finally:
         conn.close()
 
-    saved_path = _save_upload(file)
+    saved_path = save_upload_file(file, DOCX_DIR, allowed_exts={".docx"})
 
     docx_template_id = store_docx_template(
         file_path=saved_path,
@@ -112,10 +98,12 @@ def download_docx(docx_template_id: int):
             if not row:
                 raise HTTPException(status_code=404, detail="DOCX template не найден")
 
-        path, src_name, version = row[0], row[1], row[2]
+        path_str, src_name, version = row[0], row[1], row[2]
+        file_path = safe_resolve_in_dir(path_str, DOCX_DIR)
+
         filename = src_name or f"template_{docx_template_id}_v{version}.docx"
         return FileResponse(
-            path,
+            str(file_path),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             filename=filename
         )
