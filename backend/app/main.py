@@ -12,6 +12,7 @@ from backend.app.api.settings_api import router as settings_router
 from backend.app.api.generate_api import router as generate_router
 from backend.app.api.auth_api import router as auth_router
 from backend.app.api.teachers_api import router as teachers_router
+from backend.app.api.history_api import router as history_router
 
 app = FastAPI(title="IPP System API")
 
@@ -78,3 +79,4 @@ app.include_router(settings_router)
 app.include_router(generate_router)
 app.include_router(auth_router)
 app.include_router(teachers_router)
+app.include_router(history_router)
