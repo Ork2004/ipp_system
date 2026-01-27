@@ -1,6 +1,22 @@
 -- ======================================================
--- IPP System DB Schema
+-- IPP System DB Schema (NO hardcoded loops)
 -- ======================================================
+
+DROP TABLE IF EXISTS generation_history CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS generation_settings CASCADE;
+
+DROP TABLE IF EXISTS docx_placeholders CASCADE;
+DROP TABLE IF EXISTS docx_templates CASCADE;
+
+DROP TABLE IF EXISTS excel_rows CASCADE;
+DROP TABLE IF EXISTS excel_columns CASCADE;
+DROP TABLE IF EXISTS excel_templates CASCADE;
+
+DROP TABLE IF EXISTS placeholder_catalog CASCADE;
+
+DROP TABLE IF EXISTS teachers CASCADE;
+DROP TABLE IF EXISTS departments CASCADE;
 
 -- =========================
 -- CORE
@@ -27,7 +43,7 @@ CREATE TABLE teachers (
 );
 
 -- =========================
--- STABLE PLACEHOLDERS CATALOG
+-- PLACEHOLDERS CATALOG (ONLY STABLE)
 -- =========================
 CREATE TABLE placeholder_catalog (
     id               BIGSERIAL PRIMARY KEY,
@@ -38,8 +54,8 @@ CREATE TABLE placeholder_catalog (
     example          TEXT,
     created_at       TIMESTAMPTZ DEFAULT now(),
 
-    CONSTRAINT ck_catalog_type CHECK (placeholder_type IN ('text','loop')),
-    CONSTRAINT ck_catalog_cat  CHECK (category IN ('teacher','loop'))
+    CONSTRAINT ck_catalog_type CHECK (placeholder_type IN ('text')),
+    CONSTRAINT ck_catalog_cat  CHECK (category IN ('teacher'))
 );
 
 -- =========================
@@ -135,7 +151,7 @@ CREATE UNIQUE INDEX uq_docx_placeholder_basic
 ON docx_placeholders(template_id, placeholder_name, placeholder_type);
 
 -- =========================
--- GENERATION SETTINGS
+-- GENERATION SETTINGS (store mapping only)
 -- =========================
 CREATE TABLE generation_settings (
     id               BIGSERIAL PRIMARY KEY,
@@ -161,8 +177,8 @@ CREATE TABLE users (
     id BIGSERIAL PRIMARY KEY,
     email TEXT UNIQUE,
     username TEXT UNIQUE,
-    password_hash TEXT,          -- будет bcrypt
-    role TEXT NOT NULL,          -- 'admin' | 'teacher' | 'guest'
+    password_hash TEXT,
+    role TEXT NOT NULL,          -- admin | teacher | guest
     department_id BIGINT REFERENCES departments(id) ON DELETE SET NULL,
     teacher_id BIGINT REFERENCES teachers(id) ON DELETE SET NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -178,7 +194,7 @@ CREATE TABLE generation_history (
     id BIGSERIAL PRIMARY KEY,
 
     generated_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-    generated_by_role TEXT NOT NULL,  -- admin|teacher
+    generated_by_role TEXT NOT NULL,
     generated_for_teacher_id BIGINT REFERENCES teachers(id) ON DELETE SET NULL,
 
     department_id BIGINT REFERENCES departments(id) ON DELETE SET NULL,
@@ -190,7 +206,7 @@ CREATE TABLE generation_history (
     output_path TEXT,
     file_name TEXT,
 
-    status TEXT NOT NULL DEFAULT 'success', -- success|error
+    status TEXT NOT NULL DEFAULT 'success',
     error_text TEXT,
 
     created_at TIMESTAMPTZ DEFAULT now(),
@@ -223,24 +239,24 @@ VALUES (
     'PhD',
     'штатный'
 );
+
+-- admin123
 INSERT INTO users (username, password_hash, role, department_id)
-VALUES ('dept_admin', '$2b$12$dLKdTeXx3.ny13U8EYMXtORgdUEkJ/c6Kit5j4vmlMDgO0cZt/9VS', 'admin', 1); --password: admin123
+VALUES ('dept_admin', '$2b$12$dLKdTeXx3.ny13U8EYMXtORgdUEkJ/c6Kit5j4vmlMDgO0cZt/9VS', 'admin', 1);
 
+-- teacher123
 INSERT INTO users (username, password_hash, role, teacher_id, department_id)
-VALUES ('teacher1', '$2b$12$O1M4JS.K7Mna4S78wf5h2eqIrhHgEyhxJrts0gojwDdB.buEjHPLW', 'teacher', 1, 1); --password: teacher123
+VALUES ('teacher1', '$2b$12$O1M4JS.K7Mna4S78wf5h2eqIrhHgEyhxJrts0gojwDdB.buEjHPLW', 'teacher', 1, 1);
 
+-- guest123
 INSERT INTO users (username, password_hash, role)
-VALUES ('guest', '$2b$12$aH6n80.iAvKNHPHil0vFtOCKebIzsXxPeiQnKwzq7ZXCCaDoVbjMW', 'guest'); --password: guest123
+VALUES ('guest', '$2b$12$aH6n80.iAvKNHPHil0vFtOCKebIzsXxPeiQnKwzq7ZXCCaDoVbjMW', 'guest');
 
+-- stable teacher placeholders
 INSERT INTO placeholder_catalog (placeholder_name, placeholder_type, category, description, example) VALUES
 ('teacher.staff_type',      'text', 'teacher', 'Тип ставки/штатности', '{{ teacher.staff_type }}'),
 ('teacher.position',        'text', 'teacher', 'Должность',            '{{ teacher.position }}'),
 ('teacher.academic_degree', 'text', 'teacher', 'Учёная степень',       '{{ teacher.academic_degree }}'),
 ('teacher.full_name',       'text', 'teacher', 'ФИО преподавателя',    '{{ teacher.full_name }}'),
 ('teacher.department',      'text', 'teacher', 'Кафедра',              '{{ teacher.department }}'),
-('teacher.faculty',         'text', 'teacher', 'Факультет',            '{{ teacher.faculty }}'),
-
-('teaching_load_staff_sem1',  'loop', 'loop', 'Таблица: штатная нагрузка 1 семестр',  '{%tr for row in teaching_load_staff_sem1 %}'),
-('teaching_load_staff_sem2',  'loop', 'loop', 'Таблица: штатная нагрузка 2 семестр',  '{%tr for row in teaching_load_staff_sem2 %}'),
-('teaching_load_hourly_sem1', 'loop', 'loop', 'Таблица: почасовая 1 семестр',         '{%tr for row in teaching_load_hourly_sem1 %}'),
-('teaching_load_hourly_sem2', 'loop', 'loop', 'Таблица: почасовая 2 семестр',         '{%tr for row in teaching_load_hourly_sem2 %}');
+('teacher.faculty',         'text', 'teacher', 'Факультет',            '{{ teacher.faculty }}');

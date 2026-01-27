@@ -1,22 +1,12 @@
 import re
 from pathlib import Path
-from typing import List
+from typing import Dict, Any, List, Optional
 
 from docxtpl import DocxTemplate
 
 from backend.app.database import get_connection
 from backend.app.config import GENERATED_DIR
-
-
-def to_num(x):
-    if x is None:
-        return 0.0
-    if isinstance(x, (int, float)):
-        return float(x)
-    try:
-        return float(str(x).replace(",", ".").strip())
-    except Exception:
-        return 0.0
+from backend.app.utils.blocks import detect_semester_columns, build_block_rows
 
 
 def _get_teacher(cur, teacher_id: int) -> dict:
@@ -79,23 +69,40 @@ def _get_active_settings(cur, excel_template_id: int, docx_template_id: int) -> 
     return r[0]
 
 
-def _get_excel_mapping(cur, excel_template_id: int) -> dict:
+def _get_excel_columns(cur, excel_template_id: int) -> List[tuple[str, str]]:
     cur.execute("""
         SELECT column_name, header_text
         FROM excel_columns
         WHERE template_id=%s
         ORDER BY position_index;
     """, (excel_template_id,))
-    rows = cur.fetchall()
-    col_to_header = {cn: ht for (cn, ht) in rows}
-    return {"col_to_header": col_to_header, "headers": rows}
+    return cur.fetchall()
 
 
-def _build_row_object(row_data: dict, col_to_header: dict) -> dict:
-    out = {}
-    for col_name, header_text in col_to_header.items():
-        out[col_name] = row_data.get(header_text)
-    return out
+def _get_excel_mapping(cur, excel_template_id: int) -> dict:
+    cols = _get_excel_columns(cur, excel_template_id)
+    col_to_header = {cn: ht for (cn, ht) in cols}
+    return {"col_to_header": col_to_header, "columns": cols}
+
+
+def _get_excel_rows(cur, excel_template_id: int) -> List[dict]:
+    cur.execute("""
+        SELECT row_data
+        FROM excel_rows
+        WHERE template_id=%s
+        ORDER BY row_number;
+    """, (excel_template_id,))
+    return [r[0] for r in cur.fetchall()]
+
+
+def _get_docx_loop_keys(cur, docx_template_id: int) -> List[str]:
+    cur.execute("""
+        SELECT placeholder_name
+        FROM docx_placeholders
+        WHERE template_id=%s AND placeholder_type='loop'
+        ORDER BY placeholder_name;
+    """, (docx_template_id,))
+    return [r[0] for r in cur.fetchall()]
 
 
 def generate_docx_for_teacher(
@@ -117,83 +124,51 @@ def generate_docx_for_teacher(
                 raise Exception("DOCX не связан с Excel (excel_template_id = NULL). Загрузи DOCX с выбранным Excel.")
 
             settings = _get_active_settings(cur, excel_template_id, docx_template_id)
-            cols = (settings or {}).get("columns") or {}
+            cols_cfg = (settings or {}).get("columns") or {}
 
-            teacher_col = cols.get("teacher_col")
-            sem1_col = cols.get("sem1_col")
-            sem2_col = cols.get("sem2_col")
-            staff_hours_col = cols.get("staff_hours_col")
-            hourly_hours_col = cols.get("hourly_hours_col")
+            teacher_col = cols_cfg.get("teacher_col")
+            staff_hours_col = cols_cfg.get("staff_hours_col")
+            hourly_hours_col = cols_cfg.get("hourly_hours_col")
 
-            required = [teacher_col, sem1_col, sem2_col, staff_hours_col]
-            if not all(required):
-                raise Exception("Настройки неполные: teacher_col/sem1_col/sem2_col/staff_hours_col обязательны")
+            if not teacher_col or not staff_hours_col:
+                raise Exception("Настройки неполные: columns.teacher_col и columns.staff_hours_col обязательны")
 
             teacher = _get_teacher(cur, teacher_id)
-            teacher_name = (teacher["full_name"] or "").lower()
 
             mapping = _get_excel_mapping(cur, excel_template_id)
             col_to_header = mapping["col_to_header"]
+            excel_columns = mapping["columns"]
 
-            def get_val(row_data: dict, col_name: str):
-                ht = col_to_header.get(col_name)
-                return None if not ht else row_data.get(ht)
+            semester_map = detect_semester_columns(excel_columns)
+            if not semester_map:
+                raise Exception("Не найдены колонки семестров в Excel (например '1 сем', '2 сем', '3 сем').")
 
-            def is_row_for_teacher(row_data: dict) -> bool:
-                v = get_val(row_data, teacher_col)
-                return isinstance(v, str) and teacher_name in v.lower()
+            excel_rows = _get_excel_rows(cur, excel_template_id)
 
-            def has_sem(row_data: dict, sem_col: str) -> bool:
-                v = get_val(row_data, sem_col)
-                return v is not None and str(v).strip() != ""
+            loop_keys = _get_docx_loop_keys(cur, docx_template_id)
 
-            def staff_val(row_data: dict) -> float:
-                return to_num(get_val(row_data, staff_hours_col))
-
-            def hourly_val(row_data: dict) -> float:
-                if not hourly_hours_col:
-                    return 0.0
-                return to_num(get_val(row_data, hourly_hours_col))
-
-            cur.execute("""
-                SELECT row_data
-                FROM excel_rows
-                WHERE template_id=%s
-                ORDER BY row_number;
-            """, (excel_template_id,))
-            excel_rows = [r[0] for r in cur.fetchall()]
-
-            staff_sem1: List[dict] = []
-            staff_sem2: List[dict] = []
-            hourly_sem1: List[dict] = []
-            hourly_sem2: List[dict] = []
-
-            for rd in excel_rows:
-                if not is_row_for_teacher(rd):
-                    continue
-
-                s_val = staff_val(rd)
-                h_val = hourly_val(rd)
-                row_obj = _build_row_object(rd, col_to_header)
-
-                if has_sem(rd, sem1_col):
-                    if s_val > 0:
-                        staff_sem1.append(row_obj)
-                    if h_val > 0:
-                        hourly_sem1.append(row_obj)
-
-                if has_sem(rd, sem2_col):
-                    if s_val > 0:
-                        staff_sem2.append(row_obj)
-                    if h_val > 0:
-                        hourly_sem2.append(row_obj)
+            blocks: Dict[str, Any] = {}
+            for lk in loop_keys:
+                if isinstance(lk, str) and lk.startswith("blocks."):
+                    rows = build_block_rows(
+                        loop_key=lk,
+                        excel_rows=excel_rows,
+                        col_to_header=col_to_header,
+                        teacher_full_name=teacher["full_name"],
+                        teacher_col=teacher_col,
+                        semester_map=semester_map,
+                        staff_hours_col=staff_hours_col,
+                        hourly_hours_col=hourly_hours_col,
+                    )
+                    parts = lk.split(".")[1:]
+                    node = blocks
+                    for p in parts[:-1]:
+                        node = node.setdefault(p, {})
+                    node[parts[-1]] = rows
 
             context = {
                 "teacher": teacher,
-                "teaching_load_staff_sem1": staff_sem1,
-                "teaching_load_staff_sem2": staff_sem2,
-                "teaching_load_hourly_sem1": hourly_sem1,
-                "teaching_load_hourly_sem2": hourly_sem2,
+                "blocks": blocks,
             }
 
         tpl = DocxTemplate(tpl_path)
