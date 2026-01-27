@@ -3,8 +3,10 @@ from typing import Dict, Any, List, Tuple, Optional
 
 SEM_RE = re.compile(r"(?:(\d+)\s*(?:сем|semestr|semester))", re.IGNORECASE)
 
+
 def detect_semester_columns(columns: List[Tuple[str, str]]) -> Dict[str, str]:
     found: Dict[int, str] = {}
+
     for col_name, header_text in columns:
         if not header_text:
             continue
@@ -73,8 +75,7 @@ def to_num(x: Any) -> float:
 def not_empty(x: Any) -> bool:
     if x is None:
         return False
-    s = str(x).strip()
-    return s != ""
+    return str(x).strip() != ""
 
 
 def build_row_object(row_data: dict, col_to_header: dict) -> dict:
@@ -96,17 +97,16 @@ def build_block_rows(
     hourly_hours_col: Optional[str],
 ) -> List[dict]:
     parts = loop_key.split(".")
-    if len(parts) != 5 or parts[0] != "blocks" or parts[1] != "teaching_load":
+    if len(parts) != 4:
+        return []
+    if parts[0] != "blocks" or parts[1] != "teaching_load":
         return []
 
     load_kind = parts[2]
     sem_key = parts[3]
 
-    if len(parts) == 4:
-        load_kind = parts[2]
-        sem_key = parts[3]
-    else:
-        sem_key = parts[-1]
+    if load_kind not in ("staff", "hourly"):
+        return []
 
     sem_col = semester_map.get(sem_key)
     if not sem_col:
@@ -116,30 +116,17 @@ def build_block_rows(
         ht = col_to_header.get(col_name)
         return None if not ht else row_data.get(ht)
 
-    def is_row_for_teacher(row_data: dict) -> bool:
-        return match_teacher(get_val(row_data, teacher_col), teacher_full_name)
-
-    def has_sem(row_data: dict) -> bool:
-        return not_empty(get_val(row_data, sem_col))
-
-    def staff_val(row_data: dict) -> float:
-        return to_num(get_val(row_data, staff_hours_col))
-
-    def hourly_val(row_data: dict) -> float:
-        if not hourly_hours_col:
-            return 0.0
-        return to_num(get_val(row_data, hourly_hours_col))
-
     out: List[dict] = []
 
     for rd in excel_rows:
-        if not is_row_for_teacher(rd):
-            continue
-        if not has_sem(rd):
+        if not match_teacher(get_val(rd, teacher_col), teacher_full_name):
             continue
 
-        s_val = staff_val(rd)
-        h_val = hourly_val(rd)
+        if not not_empty(get_val(rd, sem_col)):
+            continue
+
+        s_val = to_num(get_val(rd, staff_hours_col))
+        h_val = to_num(get_val(rd, hourly_hours_col)) if hourly_hours_col else 0.0
 
         if load_kind == "staff" and s_val <= 0:
             continue

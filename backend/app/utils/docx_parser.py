@@ -4,9 +4,18 @@ from typing import Optional, List, Dict, Set, Tuple, Any
 
 from docx import Document
 
-TOKEN_PATTERN = re.compile(r"({%\s*for\s+.*?%}|{%\s*endfor\s*%}|{{\s*.*?\s*}})")
-LOOP_START_PATTERN = re.compile(r"{%\s*for\s+(\w+)\s+in\s+(\w+)\s*%}")
-LOOP_END_PATTERN = re.compile(r"{%\s*endfor\s*%}")
+TOKEN_PATTERN = re.compile(r"({{.*?}}|{%\s*.*?%})")
+
+LOOP_START_PATTERN = re.compile(
+    r"{%\s*(?:tr\s*)?for\s+(\w+)\s+in\s+([A-Za-z0-9_\.]+)\s*%}",
+    re.IGNORECASE,
+)
+
+LOOP_END_PATTERN = re.compile(
+    r"{%\s*(?:tr\s*)?endfor\s*%}",
+    re.IGNORECASE,
+)
+
 TEXT_PATTERN = re.compile(r"{{\s*(.*?)\s*}}")
 
 
