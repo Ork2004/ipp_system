@@ -1,6 +1,5 @@
 import re
-from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from docxtpl import DocxTemplate
 
@@ -144,27 +143,30 @@ def generate_docx_for_teacher(
                 raise Exception("Не найдены колонки семестров в Excel (например '1 сем', '2 сем', '3 сем').")
 
             excel_rows = _get_excel_rows(cur, excel_template_id)
-
             loop_keys = _get_docx_loop_keys(cur, docx_template_id)
 
             blocks: Dict[str, Any] = {}
+
             for lk in loop_keys:
-                if isinstance(lk, str) and lk.startswith("blocks."):
-                    rows = build_block_rows(
-                        loop_key=lk,
-                        excel_rows=excel_rows,
-                        col_to_header=col_to_header,
-                        teacher_full_name=teacher["full_name"],
-                        teacher_col=teacher_col,
-                        semester_map=semester_map,
-                        staff_hours_col=staff_hours_col,
-                        hourly_hours_col=hourly_hours_col,
-                    )
-                    parts = lk.split(".")[1:]
-                    node = blocks
-                    for p in parts[:-1]:
-                        node = node.setdefault(p, {})
-                    node[parts[-1]] = rows
+                if not (isinstance(lk, str) and lk.startswith("blocks.")):
+                    continue
+
+                rows = build_block_rows(
+                    loop_key=lk,
+                    excel_rows=excel_rows,
+                    col_to_header=col_to_header,
+                    teacher_full_name=teacher["full_name"],
+                    teacher_col=teacher_col,
+                    semester_map=semester_map,
+                    staff_hours_col=staff_hours_col,
+                    hourly_hours_col=hourly_hours_col,
+                )
+
+                parts = lk.split(".")[1:]
+                node = blocks
+                for p in parts[:-1]:
+                    node = node.setdefault(p, {})
+                node[parts[-1]] = rows
 
             context = {
                 "teacher": teacher,
