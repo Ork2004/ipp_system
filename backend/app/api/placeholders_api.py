@@ -16,9 +16,7 @@ def get_placeholders(excel_template_id: int):
             cur.execute("""
                 SELECT placeholder_name, placeholder_type, category, description, example
                 FROM placeholder_catalog
-                ORDER BY
-                  CASE category WHEN 'teacher' THEN 1 ELSE 2 END,
-                  placeholder_name;
+                ORDER BY placeholder_name;
             """)
             stable = [
                 {
