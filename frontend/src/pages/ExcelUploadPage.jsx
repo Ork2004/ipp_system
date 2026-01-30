@@ -31,7 +31,7 @@ export default function ExcelUploadPage() {
       localStorage.setItem("department_id", String(departmentId));
 
       setStatus(`Готово ✅ excel_template_id = ${res.data.excel_template_id}`);
-      navigate("/placeholders");
+      navigate("/workload-data");
     } catch (e) {
       setStatus("Ошибка загрузки ❌ (проверь backend и формат файла)");
       console.error(e);
