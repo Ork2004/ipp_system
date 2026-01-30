@@ -1,16 +1,58 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from backend.app.database import get_connection
-from backend.app.api.auth_api import get_current_user
-from backend.app.utils.blocks import detect_semester_columns, build_available_block_keys, build_block_snippet
+import re
 
 router = APIRouter(prefix="/blocks", tags=["Blocks"])
 
+SEM_RE = re.compile(r"(?:(\d+)\s*(?:сем|semestr|semester))", re.IGNORECASE)
+HOURLY_RE = re.compile(r"(почас|hourly)", re.IGNORECASE)
+
+
+def _detect_semester_columns(columns: list[tuple[str, str]]) -> dict:
+    found: dict[int, str] = {}
+    for col_name, header_text in columns:
+        if not header_text:
+            continue
+        m = SEM_RE.search(str(header_text))
+        if not m:
+            continue
+        try:
+            sem = int(m.group(1))
+        except Exception:
+            continue
+        if sem > 0 and sem not in found:
+            found[sem] = col_name
+
+    out = {}
+    for sem in sorted(found.keys()):
+        out[f"sem{sem}"] = found[sem]
+    return out
+
+
+def _has_hourly(columns: list[tuple[str, str]]) -> bool:
+    for _, header_text in columns:
+        if header_text and HOURLY_RE.search(str(header_text)):
+            return True
+    return False
+
+
+def _pick_example_row_field(columns: list[tuple[str, str]], exclude_cols: set[str]) -> str:
+    for col_name, _ in columns:
+        if col_name not in exclude_cols:
+            return col_name
+    return "any_field"
+
+
+def _snippet(loop_key: str, example_col: str) -> str:
+    return (
+        "{%tr for row in " + loop_key + " %}\n"
+        "  {{ row." + example_col + " }}\n"
+        "{%tr endfor %}"
+    )
+
 
 @router.get("/available")
-def available_blocks(excel_template_id: int, docx_template_id: int, user=Depends(get_current_user)):
-    if user.get("role") not in ("admin", "teacher"):
-        raise HTTPException(status_code=403, detail="Доступ только admin/teacher")
-
+def available(excel_template_id: int):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -18,42 +60,53 @@ def available_blocks(excel_template_id: int, docx_template_id: int, user=Depends
             if not cur.fetchone():
                 raise HTTPException(status_code=404, detail="Excel template не найден")
 
-            cur.execute("SELECT id, excel_template_id FROM docx_templates WHERE id=%s;", (docx_template_id,))
-            docx = cur.fetchone()
-            if not docx:
-                raise HTTPException(status_code=404, detail="DOCX template не найден")
-
             cur.execute("""
                 SELECT column_name, header_text
                 FROM excel_columns
                 WHERE template_id=%s
                 ORDER BY position_index;
             """, (excel_template_id,))
-            cols = cur.fetchall()
+            columns = cur.fetchall()
 
-            semester_map = detect_semester_columns(cols)
+        semester_map = _detect_semester_columns(columns)
+        if not semester_map:
+            return {
+                "excel_template_id": excel_template_id,
+                "semester_map": {},
+                "blocks": [],
+                "warning": "Не нашёл семестры по заголовкам (нужны вроде: '1 сем', '2 сем', '3 сем'...)."
+            }
 
-            cur.execute("""
-                SELECT config
-                FROM generation_settings
-                WHERE excel_template_id=%s AND docx_template_id=%s AND is_active=TRUE
-                ORDER BY created_at DESC
-                LIMIT 1;
-            """, (excel_template_id, docx_template_id))
-            r = cur.fetchone()
-            config = r[0] if r else {}
-            hourly_hours_col = ((config or {}).get("columns") or {}).get("hourly_hours_col")
+        has_hourly = _has_hourly(columns)
 
-            blocks = build_available_block_keys(semester_map, has_hourly=bool(hourly_hours_col))
+        exclude = set(semester_map.values())
 
-            for b in blocks:
-                b["snippet"] = build_block_snippet(b["key"], loop_var="row")
+        example_col = _pick_example_row_field(columns, exclude_cols=exclude)
+
+        blocks = []
+        for sem_key in semester_map.keys():
+            staff_key = f"blocks.teaching_load.staff.{sem_key}"
+            blocks.append({
+                "key": staff_key,
+                "title": f"Учебная нагрузка (штатная) — {sem_key}",
+                "type": "loop",
+                "snippet": _snippet(staff_key, example_col),
+            })
+
+            if has_hourly:
+                hourly_key = f"blocks.teaching_load.hourly.{sem_key}"
+                blocks.append({
+                    "key": hourly_key,
+                    "title": f"Учебная нагрузка (почасовая) — {sem_key}",
+                    "type": "loop",
+                    "snippet": _snippet(hourly_key, example_col),
+                })
 
         return {
             "excel_template_id": excel_template_id,
-            "docx_template_id": docx_template_id,
             "semester_map": semester_map,
             "blocks": blocks
         }
+
     finally:
         conn.close()
