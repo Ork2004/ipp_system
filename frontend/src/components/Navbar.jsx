@@ -1,4 +1,4 @@
-import { NavLink, useNavigate} from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 
 export default function Navbar() {
   const navigate = useNavigate();
@@ -13,6 +13,9 @@ export default function Navbar() {
     localStorage.removeItem("role");
     localStorage.removeItem("teacher_id");
     localStorage.removeItem("department_id");
+    localStorage.removeItem("excel_template_id");
+    localStorage.removeItem("docx_template_id");
+    localStorage.removeItem("academic_year");
     navigate("/login");
   }
 
@@ -20,18 +23,16 @@ export default function Navbar() {
     <div className="navbar">
       <div className="navbar-inner">
         <div className="navlinks">
-          {!token && (
+          {!token ? (
             <NavLink to="/login" className={linkClass}>
               Вход
             </NavLink>
-          )}
-
-          {token && (
+          ) : (
             <>
-              {role === "admin" && (
+              {role === "admin" ? (
                 <>
                   <NavLink to="/excel-upload" className={linkClass}>
-                    Нагрузка
+                    Excel
                   </NavLink>
                   <NavLink to="/workload-data" className={linkClass}>
                     Данные
@@ -43,7 +44,7 @@ export default function Navbar() {
                     Настройка
                   </NavLink>
                 </>
-              )}
+              ) : null}
 
               <NavLink to="/generate" className={linkClass}>
                 Генерация
@@ -53,14 +54,14 @@ export default function Navbar() {
         </div>
 
         <div className="nav-right">
-          {token && (
+          {token ? (
             <>
               <div className="pill">{role}</div>
               <button className="btn btn-outline" onClick={logout}>
                 Выйти
               </button>
             </>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

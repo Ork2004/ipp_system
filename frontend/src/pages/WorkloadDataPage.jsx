@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 
 export default function WorkloadDataPage() {
-  const [departmentId, setDepartmentId] = useState(Number(localStorage.getItem("department_id") || 1));
+  const [departmentId, setDepartmentId] = useState(Number(localStorage.getItem("department_id") || 0));
 
   const [templates, setTemplates] = useState([]);
   const [selectedYear, setSelectedYear] = useState(localStorage.getItem("academic_year") || "");
@@ -15,29 +15,34 @@ export default function WorkloadDataPage() {
   const [status, setStatus] = useState("");
 
   const years = useMemo(() => {
-    const set = new Set(templates.map(t => t.academic_year).filter(Boolean));
+    const set = new Set(templates.map((t) => t.academic_year).filter(Boolean));
     return Array.from(set).sort().reverse();
   }, [templates]);
 
   const templatesForYear = useMemo(() => {
     if (!selectedYear) return templates;
-    return templates.filter(t => t.academic_year === selectedYear);
+    return templates.filter((t) => t.academic_year === selectedYear);
   }, [templates, selectedYear]);
 
   async function loadTemplates() {
+    if (!departmentId) {
+      setStatus("Нет department_id. Выйди и зайди заново.");
+      return;
+    }
     try {
       setLoadingTemplates(true);
       const res = await api.get(`/excel/templates`, { params: { department_id: departmentId } });
-      setTemplates(res.data);
+      setTemplates(res.data || []);
 
-      if (!selectedYear && res.data.length) {
+      if (!selectedYear && (res.data || []).length) {
         const y = res.data[0].academic_year;
         setSelectedYear(y);
         localStorage.setItem("academic_year", y);
       }
+      setStatus("");
     } catch (e) {
       console.error(e);
-      setStatus("Ошибка загрузки списка Excel шаблонов");
+      setStatus(e?.response?.data?.detail || "Ошибка загрузки списка Excel");
     } finally {
       setLoadingTemplates(false);
     }
@@ -54,65 +59,54 @@ export default function WorkloadDataPage() {
       setStatus("");
     } catch (e) {
       console.error(e);
-      setStatus("Ошибка предпросмотра строк Excel");
+      setStatus(e?.response?.data?.detail || "Ошибка предпросмотра Excel");
     } finally {
       setLoadingPreview(false);
     }
   }
 
   useEffect(() => {
+    setDepartmentId(Number(localStorage.getItem("department_id") || 0));
     loadTemplates();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (!templates.length) return;
     const list = templatesForYear;
+
     if (!list.length) {
       setSelectedTemplateId("");
       setHeaders([]);
       setRows([]);
+      localStorage.removeItem("excel_template_id");
       return;
     }
-    const exists = list.some(t => String(t.id) === String(selectedTemplateId));
+
+    const exists = list.some((t) => String(t.id) === String(selectedTemplateId));
     if (!exists) {
       const firstId = String(list[0].id);
       setSelectedTemplateId(firstId);
       localStorage.setItem("excel_template_id", firstId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedYear, templates]);
 
   useEffect(() => {
     if (!selectedTemplateId) return;
     localStorage.setItem("excel_template_id", String(selectedTemplateId));
     loadPreview(selectedTemplateId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTemplateId]);
 
   return (
     <div className="container">
-      <div className="page-title">Загруженные данные</div>
+      <div className="page-title">Данные Excel (предпросмотр)</div>
 
       <div className="card card-pad">
-        <div className="section-title">Выбор Excel (год)</div>
+        <div className="section-title">Выбор</div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
-          <input
-            className="input"
-            style={{ width: 140 }}
-            value={departmentId}
-            onChange={(e) => {
-              const v = Number(e.target.value || 1);
-              setDepartmentId(v);
-              localStorage.setItem("department_id", String(v));
-            }}
-            placeholder="department_id"
-          />
-
           <select
             className="input"
-            style={{ width: 180 }}
+            style={{ width: 200 }}
             value={selectedYear}
             onChange={(e) => {
               const y = e.target.value;
@@ -123,13 +117,15 @@ export default function WorkloadDataPage() {
           >
             <option value="">{loadingTemplates ? "Загрузка..." : "Выберите год"}</option>
             {years.map((y) => (
-              <option key={y} value={y}>{y}</option>
+              <option key={y} value={y}>
+                {y}
+              </option>
             ))}
           </select>
 
           <select
             className="input"
-            style={{ width: 360 }}
+            style={{ width: 460 }}
             value={selectedTemplateId}
             onChange={(e) => setSelectedTemplateId(e.target.value)}
             disabled={loadingTemplates || !templatesForYear.length}
@@ -139,14 +135,14 @@ export default function WorkloadDataPage() {
             ) : (
               templatesForYear.map((t) => (
                 <option key={t.id} value={String(t.id)}>
-                  #{t.id} — {t.source_filename || "excel.xlsx"} {t.is_active ? "(active)" : ""}
+                  {t.source_filename || "excel.xlsx"} {t.is_active ? "(active)" : ""}
                 </option>
               ))
             )}
           </select>
 
           <button className="btn btn-outline" onClick={loadTemplates}>
-            Обновить список
+            Обновить
           </button>
 
           <div className="small">{status}</div>
@@ -164,17 +160,19 @@ export default function WorkloadDataPage() {
             </thead>
             <tbody>
               {loadingPreview ? (
-                <tr><td colSpan={7}>Загрузка строк...</td></tr>
+                <tr>
+                  <td colSpan={7}>Загрузка строк...</td>
+                </tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={7}>Нет строк для отображения</td></tr>
+                <tr>
+                  <td colSpan={7}>Нет строк</td>
+                </tr>
               ) : (
                 rows.map((r) => (
                   <tr key={r.row_number}>
                     <td>{r.row_number}</td>
                     {headers.slice(0, 6).map((h) => (
-                      <td key={h}>
-                        {r.row_data?.[h] ?? ""}
-                      </td>
+                      <td key={h}>{r.row_data?.[h] ?? ""}</td>
                     ))}
                   </tr>
                 ))
@@ -184,13 +182,7 @@ export default function WorkloadDataPage() {
         </div>
 
         <div className="small" style={{ marginTop: 10 }}>
-          Сейчас показываем первые 6 колонок и первые 30 строк (preview). Потом расширим/пагинацию добавим.
-        </div>
-
-        <div className="center">
-          <button className="btn btn-primary" onClick={() => alert("OK")}>
-            OK
-          </button>
+          Показаны первые 6 колонок и первые 30 строк.
         </div>
       </div>
     </div>
