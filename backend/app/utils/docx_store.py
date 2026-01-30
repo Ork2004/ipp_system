@@ -44,7 +44,9 @@ def store_docx_template(
                 for p in placeholders:
                     cur.execute("""
                         INSERT INTO docx_placeholders(template_id, placeholder_name, placeholder_type, extra_meta)
-                        VALUES (%s,%s,%s,%s);
+                        VALUES (%s,%s,%s,%s)
+                        ON CONFLICT (template_id, placeholder_name, placeholder_type)
+                        DO UPDATE SET extra_meta = EXCLUDED.extra_meta;
                     """, (
                         docx_template_id,
                         p["placeholder_name"],
@@ -55,3 +57,4 @@ def store_docx_template(
         return docx_template_id
     finally:
         conn.close()
+F

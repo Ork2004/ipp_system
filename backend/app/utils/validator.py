@@ -1,5 +1,47 @@
+import re
 from backend.app.database import get_connection
-from backend.app.utils.blocks import detect_semester_columns, build_available_block_keys
+
+SEM_RE = re.compile(r"(?:(\d+)\s*(?:сем|semestr|semester))", re.IGNORECASE)
+HOURLY_RE = re.compile(r"(почас|hourly)", re.IGNORECASE)
+
+
+def _detect_semesters(columns: list[tuple[str, str]]) -> list[str]:
+    found = set()
+    for _, header_text in columns:
+        if not header_text:
+            continue
+        m = SEM_RE.search(str(header_text))
+        if not m:
+            continue
+        try:
+            sem = int(m.group(1))
+        except Exception:
+            continue
+        if sem > 0:
+            found.add(sem)
+    return [f"sem{n}" for n in sorted(found)]
+
+
+def _has_hourly(columns: list[tuple[str, str]]) -> bool:
+    for _, header_text in columns:
+        if header_text and HOURLY_RE.search(str(header_text)):
+            return True
+    return False
+
+
+def _build_available_loops(columns: list[tuple[str, str]]) -> list[str]:
+    sems = _detect_semesters(columns)
+    if not sems:
+        return []
+
+    hourly = _has_hourly(columns)
+
+    loops = []
+    for sem in sems:
+        loops.append(f"blocks.teaching_load.staff.{sem}")
+        if hourly:
+            loops.append(f"blocks.teaching_load.hourly.{sem}")
+    return loops
 
 
 def validate_docx_against_excel(docx_template_id: int) -> dict:
@@ -18,6 +60,7 @@ def validate_docx_against_excel(docx_template_id: int) -> dict:
                     "errors": ["DOCX не связан с Excel (excel_template_id is NULL)"],
                     "missing_row_placeholders": [],
                     "unused_excel_columns": [],
+                    "used_row_placeholders": [],
                     "unknown_loops": [],
                     "available_loops": [],
                 }
@@ -27,33 +70,10 @@ def validate_docx_against_excel(docx_template_id: int) -> dict:
             cur.execute("""
                 SELECT column_name, header_text
                 FROM excel_columns
-                WHERE template_id=%s
-                ORDER BY position_index;
+                WHERE template_id=%s;
             """, (excel_template_id,))
             excel_cols_rows = cur.fetchall()
             excel_cols = {x[0] for x in excel_cols_rows}
-
-            cur.execute("""
-                SELECT dt.id
-                FROM docx_templates dt
-                WHERE dt.id=%s;
-            """, (docx_template_id,))
-            cur.fetchone()
-
-            cur.execute("""
-                SELECT config
-                FROM generation_settings
-                WHERE excel_template_id=%s AND docx_template_id=%s AND is_active=TRUE
-                ORDER BY created_at DESC
-                LIMIT 1;
-            """, (excel_template_id, docx_template_id))
-            s = cur.fetchone()
-            config = s[0] if s else {}
-            hourly_hours_col = ((config or {}).get("columns") or {}).get("hourly_hours_col")
-
-            semester_map = detect_semester_columns(excel_cols_rows)
-            available = build_available_block_keys(semester_map, has_hourly=bool(hourly_hours_col))
-            available_loop_keys = {b["key"] for b in available}
 
             cur.execute("""
                 SELECT placeholder_name, placeholder_type
@@ -63,13 +83,9 @@ def validate_docx_against_excel(docx_template_id: int) -> dict:
             docx_ph = cur.fetchall()
 
             used_row = []
-            used_loops = []
             for name, ptype in docx_ph:
                 if ptype == "text" and isinstance(name, str) and name.startswith("row."):
                     used_row.append(name)
-                if ptype == "loop" and isinstance(name, str):
-                    used_loops.append(name)
-
             used_row_set = set(used_row)
 
             missing = []
@@ -83,28 +99,37 @@ def validate_docx_against_excel(docx_template_id: int) -> dict:
                 if f"row.{col}" not in used_row_set:
                     unused.append(f"row.{col}")
 
-            unknown_loops = []
-            for lk in used_loops:
-                if lk.startswith("blocks.") and lk not in available_loop_keys:
-                    unknown_loops.append(lk)
+            used_loops = set()
+            for name, ptype in docx_ph:
+                if ptype == "loop" and isinstance(name, str) and name.startswith("blocks."):
+                    used_loops.add(name.strip())
 
-            ok = (len(missing) == 0) and (len(unknown_loops) == 0)
+            available_loops = set(_build_available_loops(excel_cols_rows))
+
+            unknown_loops = []
+            if used_loops:
+                for lp in sorted(used_loops):
+                    if lp not in available_loops:
+                        unknown_loops.append(lp)
 
             errors = []
             if missing:
-                errors.append("В DOCX есть row.* которых нет в Excel (см missing_row_placeholders)")
+                errors.append("В DOCX есть row.* которых нет в Excel (смотри missing_row_placeholders)")
             if unknown_loops:
                 errors.append("В DOCX есть loops blocks.* которых нет среди доступных (см unknown_loops)")
+
+            ok = (len(missing) == 0) and (len(unknown_loops) == 0)
 
             return {
                 "ok": ok,
                 "excel_template_id": excel_template_id,
                 "docx_template_id": docx_template_id,
+                "used_row_placeholders": sorted(list(used_row_set)),
                 "missing_row_placeholders": sorted(missing),
                 "unused_excel_columns": sorted(unused),
-                "unknown_loops": sorted(unknown_loops),
-                "available_loops": sorted(list(available_loop_keys)),
-                "errors": errors,
+                "available_loops": sorted(list(available_loops)),
+                "unknown_loops": unknown_loops,
+                "errors": errors
             }
     finally:
         conn.close()
