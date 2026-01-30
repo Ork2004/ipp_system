@@ -1,15 +1,26 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useNavigate } from "react-router-dom";
 
 export default function ExcelUploadPage() {
-  const [departmentId, setDepartmentId] = useState(Number(localStorage.getItem("department_id") || 1));
+  const navigate = useNavigate();
+
   const [academicYear, setAcademicYear] = useState(localStorage.getItem("academic_year") || "2025-2026");
   const [file, setFile] = useState(null);
   const [status, setStatus] = useState("");
-  const navigate = useNavigate();
+
+  const [departmentId, setDepartmentId] = useState(Number(localStorage.getItem("department_id") || 0));
+
+  useEffect(() => {
+    const dep = Number(localStorage.getItem("department_id") || 0);
+    setDepartmentId(dep);
+  }, []);
 
   async function handleUpload() {
+    if (!departmentId) {
+      setStatus("Нет department_id. Выйди и зайди заново (чтобы токен сохранил кафедру).");
+      return;
+    }
     if (!file) {
       setStatus("Выберите Excel файл (.xlsx)");
       return;
@@ -28,13 +39,12 @@ export default function ExcelUploadPage() {
 
       localStorage.setItem("excel_template_id", String(res.data.excel_template_id));
       localStorage.setItem("academic_year", academicYear);
-      localStorage.setItem("department_id", String(departmentId));
 
-      setStatus(`Готово ✅ excel_template_id = ${res.data.excel_template_id}`);
-      navigate("/workload-data");
+      setStatus(`Готово ✅ Excel загружен`);
+      navigate("/settings");
     } catch (e) {
-      setStatus("Ошибка загрузки ❌ (проверь backend и формат файла)");
       console.error(e);
+      setStatus(e?.response?.data?.detail || "Ошибка загрузки ❌");
     }
   }
 
@@ -43,7 +53,21 @@ export default function ExcelUploadPage() {
       <div className="page-title">Загрузка Excel-файла нагрузки</div>
 
       <div className="card card-pad">
-        <div className="section-title">Загрузка файла</div>
+        <div className="section-title">Параметры</div>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
+          <input
+            className="input"
+            style={{ width: 200 }}
+            value={academicYear}
+            onChange={(e) => {
+              setAcademicYear(e.target.value);
+              localStorage.setItem("academic_year", e.target.value);
+            }}
+            placeholder="2025-2026"
+          />
+          <div className="small">{status}</div>
+        </div>
 
         <div className="upload-box">
           <input
@@ -54,7 +78,7 @@ export default function ExcelUploadPage() {
             onChange={(e) => setFile(e.target.files?.[0] || null)}
           />
           <button className="btn btn-primary" onClick={() => document.getElementById("excel-file").click()}>
-            Выберите файл
+            Выберите Excel
           </button>
 
           <div className="small" style={{ marginTop: 10 }}>
@@ -63,26 +87,9 @@ export default function ExcelUploadPage() {
         </div>
 
         <div className="actions-row">
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <input
-              className="input"
-              style={{ width: 140 }}
-              value={departmentId}
-              onChange={(e) => setDepartmentId(Number(e.target.value || 1))}
-              placeholder="department_id"
-            />
-            <input
-              className="input"
-              style={{ width: 160 }}
-              value={academicYear}
-              onChange={(e) => setAcademicYear(e.target.value)}
-              placeholder="2025-2026"
-            />
-            <div className="small">{status}</div>
-          </div>
-
+          <div className="small">Кафедра берётся автоматически из аккаунта.</div>
           <button className="btn btn-primary" onClick={handleUpload}>
-            ЗАГРУЗИТЬ ФАЙЛ
+            ЗАГРУЗИТЬ
           </button>
         </div>
       </div>
