@@ -45,12 +45,12 @@ export default function DocxUploadPage() {
 
   return (
     <div className="container">
-      <div className="page-title">Загрузка DOCX (связка с Excel)</div>
+      <div className="page-title">Загрузка DOCX (привязка к Excel)</div>
 
       <div className="card card-pad">
         <div className="section-title">Параметры</div>
 
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
           <input className="input" style={{ width: 140 }} value={departmentId} onChange={(e) => setDepartmentId(Number(e.target.value || 1))} />
           <input className="input" style={{ width: 160 }} value={academicYear} onChange={(e) => setAcademicYear(e.target.value)} />
           <input
@@ -64,6 +64,10 @@ export default function DocxUploadPage() {
             placeholder="excel_template_id"
           />
           <div className="small">{status}</div>
+        </div>
+
+        <div className="small" style={{ marginBottom: 12 }}>
+          В DOCX вставляй плейсхолдеры и blocks (loops) только из страницы <b>Settings</b>.
         </div>
 
         <div className="upload-box">
@@ -84,9 +88,7 @@ export default function DocxUploadPage() {
         </div>
 
         <div className="actions-row" style={{ marginTop: 12 }}>
-          <div className="small">
-            DOCX будет привязан к текущему excel_template_id.
-          </div>
+          <div className="small">DOCX будет связан с текущим excel_template_id.</div>
           <button className="btn btn-primary" onClick={handleUpload}>
             ЗАГРУЗИТЬ DOCX
           </button>
@@ -95,9 +97,19 @@ export default function DocxUploadPage() {
         {compat ? (
           <div style={{ marginTop: 16 }}>
             <div className="section-title">Проверка совместимости</div>
+
             <div className="small">
               ok: <b>{String(compat.ok)}</b>
             </div>
+
+            {(compat.errors || []).length ? (
+              <div style={{ marginTop: 10 }}>
+                <div className="small" style={{ fontWeight: 800 }}>Ошибки:</div>
+                <ul className="small">
+                  {(compat.errors || []).map((x) => <li key={x}>{x}</li>)}
+                </ul>
+              </div>
+            ) : null}
 
             {compat.missing_row_placeholders?.length ? (
               <div style={{ marginTop: 10 }}>
@@ -105,6 +117,18 @@ export default function DocxUploadPage() {
                 <ul className="small">
                   {compat.missing_row_placeholders.map(x => <li key={x}>{x}</li>)}
                 </ul>
+              </div>
+            ) : null}
+
+            {compat.unknown_loops?.length ? (
+              <div style={{ marginTop: 10 }}>
+                <div className="small" style={{ fontWeight: 800 }}>❌ В DOCX есть blocks (loops), которых нет среди доступных:</div>
+                <ul className="small">
+                  {compat.unknown_loops.map(x => <li key={x}>{x}</li>)}
+                </ul>
+                <div className="small" style={{ marginTop: 6 }}>
+                  Решение: вставляй blocks только из Settings → “Blocks (loops)”.
+                </div>
               </div>
             ) : null}
 

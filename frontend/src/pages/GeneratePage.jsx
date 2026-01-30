@@ -37,7 +37,7 @@ export default function GeneratePage() {
       <div className="card card-pad">
         <div className="section-title">Параметры</div>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
           <input className="input" style={{ width: 140 }} value={teacherId} onChange={(e) => setTeacherId(Number(e.target.value || 1))} placeholder="teacher_id" />
           <input className="input" style={{ width: 140 }} value={departmentId} onChange={(e) => setDepartmentId(Number(e.target.value || 1))} placeholder="department_id" />
           <input className="input" style={{ width: 160 }} value={academicYear} onChange={(e) => setAcademicYear(e.target.value)} placeholder="2025-2026" />
@@ -54,10 +54,15 @@ export default function GeneratePage() {
           <div className="small">{status}</div>
         </div>
 
+        <div className="small" style={{ marginBottom: 12 }}>
+          Перед генерацией:
+          <br />1) Excel Upload
+          <br />2) Settings: вставь <b>teacher.*</b>, <b>row.*</b>, <b>blocks (loops)</b> в DOCX
+          <br />3) DOCX Upload
+          <br />4) Settings → <b>Сохранить</b>
+        </div>
+
         <div className="actions-row">
-          <div className="small">
-            Перед генерацией: загрузить Excel → вставить row.* в DOCX → загрузить DOCX → сохранить Settings.
-          </div>
           <button className="btn btn-primary" onClick={generate}>СГЕНЕРИРОВАТЬ</button>
         </div>
 
