@@ -157,7 +157,7 @@ export default function ExcelUploadPage() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div className="section-title">Загруженные Excel</div>
           <button className="btn" onClick={() => loadTemplates(departmentId)} disabled={loadingList}>
-            Обновить
+            Обновить список
           </button>
         </div>
 

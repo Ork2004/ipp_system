@@ -1,6 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import FileResponse
-from pathlib import Path
 
 from backend.app.database import get_connection
 from backend.app.utils.docx_store import store_docx_template
@@ -20,12 +19,21 @@ def upload_docx(
     file: UploadFile = File(...),
     user=Depends(require_roles("admin"))
 ):
+    admin_dep = user.get("department_id")
+    if not admin_dep:
+        raise HTTPException(status_code=403, detail="У админа нет department_id в токене")
+    if int(department_id) != int(admin_dep):
+        raise HTTPException(status_code=403, detail="department_id должен совпадать с кафедрой админа")
+
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM excel_templates WHERE id=%s;", (excel_template_id,))
-            if not cur.fetchone():
+            cur.execute("SELECT id, department_id FROM excel_templates WHERE id=%s;", (excel_template_id,))
+            ex = cur.fetchone()
+            if not ex:
                 raise HTTPException(status_code=404, detail="Excel template не найден (excel_template_id)")
+            if ex[1] != admin_dep:
+                raise HTTPException(status_code=403, detail="Нельзя привязать DOCX к Excel другой кафедры")
     finally:
         conn.close()
 
@@ -59,7 +67,8 @@ def list_docx_templates(department_id: int):
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT id, academic_year, source_filename, current_file_path, is_active, status, created_at, version, excel_template_id
+                SELECT id, academic_year, source_filename, current_file_path,
+                       is_active, status, created_at, version, excel_template_id
                 FROM docx_templates
                 WHERE department_id = %s
                 ORDER BY academic_year DESC, created_at DESC;
@@ -80,6 +89,50 @@ def list_docx_templates(department_id: int):
             }
             for r in rows
         ]
+    finally:
+        conn.close()
+
+
+@router.delete("/{docx_template_id}")
+def delete_docx_template(
+    docx_template_id: int,
+    user=Depends(require_roles("admin"))
+):
+    admin_dep = user.get("department_id")
+    if not admin_dep:
+        raise HTTPException(status_code=403, detail="У админа нет department_id в токене")
+
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, department_id, current_file_path
+                    FROM docx_templates
+                    WHERE id=%s;
+                """, (docx_template_id,))
+                row = cur.fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail="DOCX template не найден")
+
+                _, dep_id, path_str = row
+                if dep_id != admin_dep:
+                    raise HTTPException(status_code=403, detail="Нельзя удалять DOCX другой кафедры")
+
+                deleted_file = False
+                if path_str:
+                    try:
+                        p = safe_resolve_in_dir(path_str, DOCX_DIR)
+                        if p.exists() and p.is_file():
+                            p.unlink()
+                            deleted_file = True
+                    except Exception:
+                        deleted_file = False
+
+                cur.execute("DELETE FROM docx_templates WHERE id=%s;", (docx_template_id,))
+
+        return {"status": "ok", "deleted_docx_template_id": docx_template_id, "deleted_file": deleted_file}
+
     finally:
         conn.close()
 
