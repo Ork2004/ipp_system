@@ -1,7 +1,9 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
+from pathlib import Path
+
 from backend.app.database import get_connection
 from backend.app.utils.excel_parser import parse_excel
-from backend.app.utils.storage import save_upload_file
+from backend.app.utils.storage import save_upload_file, safe_resolve_in_dir
 from backend.app.config import EXCEL_DIR
 from backend.app.api.auth_api import require_roles
 
@@ -124,5 +126,49 @@ def get_excel_columns(excel_template_id: int):
             }
             for r in rows
         ]
+    finally:
+        conn.close()
+
+
+@router.delete("/{excel_template_id}")
+def delete_excel_template(
+    excel_template_id: int,
+    user=Depends(require_roles("admin"))
+):
+    admin_dep = user.get("department_id")
+    if not admin_dep:
+        raise HTTPException(status_code=403, detail="У админа нет department_id в токене")
+
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, department_id, file_path
+                    FROM excel_templates
+                    WHERE id=%s;
+                """, (excel_template_id,))
+                row = cur.fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail="Excel template не найден")
+
+                _, dep_id, file_path = row
+                if dep_id != admin_dep:
+                    raise HTTPException(status_code=403, detail="Нельзя удалять Excel другой кафедры")
+
+                deleted_file = False
+                if file_path:
+                    try:
+                        p = safe_resolve_in_dir(file_path, EXCEL_DIR)
+                        if p.exists() and p.is_file():
+                            p.unlink()
+                            deleted_file = True
+                    except Exception:
+                        deleted_file = False
+
+                cur.execute("DELETE FROM excel_templates WHERE id=%s;", (excel_template_id,))
+
+        return {"status": "ok", "deleted_excel_template_id": excel_template_id, "deleted_file": deleted_file}
+
     finally:
         conn.close()
