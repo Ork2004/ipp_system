@@ -1,4 +1,4 @@
-import { useState} from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import "./styles/LoginPage.css";
@@ -37,8 +37,10 @@ export default function LoginPage() {
       const role = payload.role || "guest";
       localStorage.setItem("role", role);
 
-      if (payload.teacher_id) localStorage.setItem("teacher_id", String(payload.teacher_id));
-      if (payload.department_id) localStorage.setItem("department_id", String(payload.department_id));
+      if (payload.teacher_id)
+        localStorage.setItem("teacher_id", String(payload.teacher_id));
+      if (payload.department_id)
+        localStorage.setItem("department_id", String(payload.department_id));
 
       if (role === "admin") nav("/settings");
       else nav("/generate");
@@ -61,8 +63,7 @@ export default function LoginPage() {
             <div className="login-header">
               <div className="login-logo">IPP</div>
               <div className="login-headtext">
-                <div className="login-title">Вход</div>
-                <div className="small">Введите логин и пароль, чтобы продолжить работу.</div>
+                <div className="login-title">Вход в систему</div>
               </div>
             </div>
 
@@ -70,25 +71,23 @@ export default function LoginPage() {
 
             <form onSubmit={onSubmit} className="login-form">
               <div className="login-field">
-                <div className="login-label">Логин</div>
                 <input
                   className="input"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="например: dept_admin / teacher1 / guest"
+                  placeholder="Введите логин"
                   autoComplete="username"
                   required
                 />
               </div>
 
               <div className="login-field">
-                <div className="login-label">Пароль</div>
                 <input
                   className="input"
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="Введите пароль"
                   autoComplete="current-password"
                   required
                 />
@@ -97,9 +96,12 @@ export default function LoginPage() {
               {error ? <div className="login-error">{error}</div> : null}
 
               <div className="actions-row login-actions">
-                <div className="small">Роль определится автоматически (admin/teacher/guest).</div>
-                <button className="btn btn-primary" type="submit" disabled={loading}>
-                  {loading ? "Входим..." : "Войти"}
+                <button
+                  className="btn btn-primary"
+                  type="submit"
+                  disabled={loading}
+                >
+                  {loading ? "Вход..." : "Войти"}
                 </button>
               </div>
             </form>

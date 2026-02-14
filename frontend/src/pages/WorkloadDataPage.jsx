@@ -15,63 +15,104 @@ export default function WorkloadDataPage() {
   const [status, setStatus] = useState("");
 
   const years = useMemo(() => {
-    const set = new Set(templates.map((t) => t.academic_year).filter(Boolean));
+    const set = new Set((templates || []).map((t) => t.academic_year).filter(Boolean));
     return Array.from(set).sort().reverse();
   }, [templates]);
 
   const templatesForYear = useMemo(() => {
     if (!selectedYear) return templates;
-    return templates.filter((t) => t.academic_year === selectedYear);
+    return (templates || []).filter((t) => t.academic_year === selectedYear);
   }, [templates, selectedYear]);
 
-  async function loadTemplates() {
-    if (!departmentId) {
+  async function loadTemplates(depId) {
+    if (!depId) {
       setStatus("Нет department_id. Выйди и зайди заново.");
-      return;
+      return [];
     }
     try {
       setLoadingTemplates(true);
-      const res = await api.get(`/excel/templates`, { params: { department_id: departmentId } });
-      setTemplates(res.data || []);
+      const res = await api.get("/excel/templates", { params: { department_id: depId } });
+      const list = res.data || [];
+      setTemplates(list);
 
-      if (!selectedYear && (res.data || []).length) {
-        const y = res.data[0].academic_year;
-        setSelectedYear(y);
-        localStorage.setItem("academic_year", y);
+      if (!selectedYear && list.length) {
+        const y = list[0].academic_year || "";
+        if (y) {
+          setSelectedYear(y);
+          localStorage.setItem("academic_year", y);
+        }
       }
+
       setStatus("");
+      return list;
     } catch (e) {
       console.error(e);
-      setStatus(e?.response?.data?.detail || "Ошибка загрузки списка Excel");
+      setStatus(e?.response?.data?.detail || "Ошибка загрузки списка");
+      return [];
     } finally {
       setLoadingTemplates(false);
     }
   }
 
-  async function loadPreview(templateId) {
+  async function loadPreviewAll(templateId) {
     if (!templateId) return;
+
     try {
       setLoadingPreview(true);
-      setStatus("Загрузка предпросмотра...");
-      const res = await api.get(`/excel/${templateId}/preview`, { params: { limit: 30, offset: 0 } });
-      setHeaders(res.data.headers || []);
-      setRows(res.data.rows || []);
+      setStatus("Загрузка...");
+
+      const first = await api.get(`/excel/${templateId}/preview`, { params: { limit: 50, offset: 0 } });
+      const hdrs = first.data.headers || [];
+      setHeaders(hdrs);
+
+      const firstRows = first.data.rows || [];
+      let allRows = [...firstRows];
+
+      const PAGE = 300;
+      let offset = allRows.length;
+
+      while (true) {
+        const res = await api.get(`/excel/${templateId}/preview`, { params: { limit: PAGE, offset } });
+        const chunk = res.data.rows || [];
+        if (!chunk.length) break;
+
+        allRows = allRows.concat(chunk);
+        offset += chunk.length;
+
+        if (chunk.length < PAGE) break;
+      }
+
+      setRows(allRows);
       setStatus("");
     } catch (e) {
       console.error(e);
-      setStatus(e?.response?.data?.detail || "Ошибка предпросмотра Excel");
+      setStatus(e?.response?.data?.detail || "Ошибка загрузки данных");
+      setHeaders([]);
+      setRows([]);
     } finally {
       setLoadingPreview(false);
     }
   }
 
   useEffect(() => {
-    setDepartmentId(Number(localStorage.getItem("department_id") || 0));
-    loadTemplates();
+    const dep = Number(localStorage.getItem("department_id") || 0);
+    setDepartmentId(dep);
+
+    (async () => {
+      const list = await loadTemplates(dep);
+      const savedId = localStorage.getItem("excel_template_id") || "";
+      if (savedId) {
+        setSelectedTemplateId(savedId);
+      } else {
+        if (!list.length) setSelectedTemplateId("");
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (!templates.length) return;
+
     const list = templatesForYear;
 
     if (!list.length) {
@@ -88,21 +129,21 @@ export default function WorkloadDataPage() {
       setSelectedTemplateId(firstId);
       localStorage.setItem("excel_template_id", firstId);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedYear, templates]);
 
   useEffect(() => {
     if (!selectedTemplateId) return;
     localStorage.setItem("excel_template_id", String(selectedTemplateId));
-    loadPreview(selectedTemplateId);
+    loadPreviewAll(selectedTemplateId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTemplateId]);
 
   return (
     <div className="container">
-      <div className="page-title">Данные Excel (предпросмотр)</div>
+      <div className="page-title">Данные нагрузки</div>
 
       <div className="card card-pad">
-        <div className="section-title">Выбор</div>
-
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 14 }}>
           <select
             className="input"
@@ -115,7 +156,7 @@ export default function WorkloadDataPage() {
             }}
             disabled={loadingTemplates}
           >
-            <option value="">{loadingTemplates ? "Загрузка..." : "Выберите год"}</option>
+            <option value="">{loadingTemplates ? "Загрузка..." : "Год"}</option>
             {years.map((y) => (
               <option key={y} value={y}>
                 {y}
@@ -125,13 +166,13 @@ export default function WorkloadDataPage() {
 
           <select
             className="input"
-            style={{ width: 460 }}
+            style={{ width: 520 }}
             value={selectedTemplateId}
             onChange={(e) => setSelectedTemplateId(e.target.value)}
             disabled={loadingTemplates || !templatesForYear.length}
           >
             {!templatesForYear.length ? (
-              <option value="">Нет загруженных Excel</option>
+              <option value="">Нет файлов</option>
             ) : (
               templatesForYear.map((t) => (
                 <option key={t.id} value={String(t.id)}>
@@ -141,48 +182,79 @@ export default function WorkloadDataPage() {
             )}
           </select>
 
-          <button className="btn btn-outline" onClick={loadTemplates}>
-            Обновить
-          </button>
-
           <div className="small">{status}</div>
         </div>
 
-        <div className="table-wrap">
-          <table className="table">
+        {/* ВАЖНО: горизонтальный скролл */}
+        <div style={{ overflowX: "auto", borderRadius: 12 }}>
+          <table className="table" style={{ minWidth: 900, tableLayout: "auto", whiteSpace: "nowrap" }}>
             <thead>
               <tr>
-                <th style={{ width: 70 }}>№</th>
-                {headers.slice(0, 6).map((h) => (
-                  <th key={h}>{h}</th>
+                {/* sticky № */}
+                <th
+                  style={{
+                    position: "sticky",
+                    left: 0,
+                    zIndex: 3,
+                    width: 70,
+                    minWidth: 70,
+                    background: "var(--bg, #fff)",
+                  }}
+                >
+                  №
+                </th>
+
+                {headers.map((h) => (
+                  <th
+                    key={h}
+                    style={{
+                      minWidth: 160, // чтобы колонки были читаемые
+                      background: "var(--bg, #fff)",
+                    }}
+                  >
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
+
             <tbody>
               {loadingPreview ? (
                 <tr>
-                  <td colSpan={7}>Загрузка строк...</td>
+                  <td colSpan={Math.max(1, headers.length + 1)}>Загрузка...</td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>Нет строк</td>
+                  <td colSpan={Math.max(1, headers.length + 1)}>Нет строк</td>
                 </tr>
               ) : (
                 rows.map((r) => (
                   <tr key={r.row_number}>
-                    <td>{r.row_number}</td>
-                    {headers.slice(0, 6).map((h) => (
-                      <td key={h}>{r.row_data?.[h] ?? ""}</td>
+                    {/* sticky № */}
+                    <td
+                      style={{
+                        position: "sticky",
+                        left: 0,
+                        zIndex: 2,
+                        background: "var(--bg, #fff)",
+                        fontWeight: 700,
+                        width: 70,
+                        minWidth: 70,
+                      }}
+                    >
+                      {r.row_number}
+                    </td>
+
+                    {headers.map((h) => (
+                      <td key={h} style={{ minWidth: 160 }}>
+                        {r.row_data?.[h] ?? ""}
+                      </td>
                     ))}
                   </tr>
                 ))
               )}
             </tbody>
           </table>
-        </div>
-
-        <div className="small" style={{ marginTop: 10 }}>
-          Показаны первые 6 колонок и первые 30 строк.
         </div>
       </div>
     </div>
