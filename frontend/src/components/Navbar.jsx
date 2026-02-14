@@ -32,16 +32,16 @@ export default function Navbar() {
               {role === "admin" ? (
                 <>
                   <NavLink to="/excel-upload" className={linkClass}>
-                    Excel
+                    Нагрузка
                   </NavLink>
                   <NavLink to="/workload-data" className={linkClass}>
                     Данные
                   </NavLink>
-                  <NavLink to="/docx-upload" className={linkClass}>
-                    DOCX
-                  </NavLink>
                   <NavLink to="/settings" className={linkClass}>
                     Настройка
+                  </NavLink>
+                  <NavLink to="/docx-upload" className={linkClass}>
+                    ИПП
                   </NavLink>
                 </>
               ) : null}

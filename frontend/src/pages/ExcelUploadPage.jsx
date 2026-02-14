@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import { useNavigate } from "react-router-dom";
 
 function fmtDateTime(v) {
   if (!v) return "";
@@ -12,35 +11,48 @@ function fmtDateTime(v) {
 }
 
 export default function ExcelUploadPage() {
-  const navigate = useNavigate();
-
-  const [academicYear, setAcademicYear] = useState(
-    localStorage.getItem("academic_year") || "2025-2026"
-  );
+  const [academicYear, setAcademicYear] = useState(localStorage.getItem("academic_year") || "2025-2026");
   const [file, setFile] = useState(null);
   const [status, setStatus] = useState("");
 
   const [departmentId, setDepartmentId] = useState(0);
   const [templates, setTemplates] = useState([]);
   const [loadingList, setLoadingList] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const selectedExcelId = localStorage.getItem("excel_template_id");
 
   useEffect(() => {
     const dep = Number(localStorage.getItem("department_id") || 0);
     setDepartmentId(dep);
-    if (dep) {
-      loadTemplates(dep);
-    }
+    if (dep) loadTemplates(dep);
+
+    const refresh = () => {
+      const d = Number(localStorage.getItem("department_id") || 0);
+      if (d) loadTemplates(d);
+    };
+
+    const onFocus = () => refresh();
+    window.addEventListener("focus", onFocus);
+
+    const onVis = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVis);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, []);
 
   async function loadTemplates(depId) {
     setLoadingList(true);
     try {
-      const r = await api.get("/excel/templates", {
-        params: { department_id: depId },
-      });
+      const r = await api.get("/excel/templates", { params: { department_id: depId } });
       setTemplates(Array.isArray(r.data) ? r.data : []);
+    } catch (e) {
+      setStatus(e?.response?.data?.detail || "Ошибка загрузки списка");
     } finally {
       setLoadingList(false);
     }
@@ -52,12 +64,14 @@ export default function ExcelUploadPage() {
       return;
     }
     if (!file) {
-      setStatus("Выберите Excel файл (.xlsx)");
+      setStatus("Выберите файл .xlsx/.xls");
       return;
     }
 
     try {
+      setUploading(true);
       setStatus("Загрузка...");
+
       const form = new FormData();
       form.append("department_id", String(departmentId));
       form.append("academic_year", academicYear);
@@ -70,25 +84,25 @@ export default function ExcelUploadPage() {
       localStorage.setItem("excel_template_id", String(res.data.excel_template_id));
       localStorage.setItem("academic_year", academicYear);
 
-      setStatus("Готово ✅ Excel загружен");
+      setStatus("Загружено");
       setFile(null);
-      await loadTemplates(departmentId);
 
-      navigate("/settings");
+      await loadTemplates(departmentId);
     } catch (e) {
       console.error(e);
-      setStatus(e?.response?.data?.detail || "Ошибка загрузки ❌");
+      setStatus(e?.response?.data?.detail || "Ошибка загрузки");
+    } finally {
+      setUploading(false);
     }
   }
 
   function selectTemplate(id) {
     localStorage.setItem("excel_template_id", String(id));
-    setStatus(`Выбран Excel шаблон #${id}`);
-    navigate("/settings");
+    setStatus("Выбрано");
   }
 
   async function deleteTemplate(id) {
-    const ok = window.confirm(`Удалить Excel шаблон #${id}?`);
+    const ok = window.confirm("Удалить выбранную нагрузку?");
     if (!ok) return;
 
     try {
@@ -98,22 +112,19 @@ export default function ExcelUploadPage() {
         localStorage.removeItem("excel_template_id");
       }
 
-      setStatus("Excel удалён ✅");
+      setStatus("Удалено");
       await loadTemplates(departmentId);
     } catch (e) {
-      setStatus(e?.response?.data?.detail || "Ошибка удаления ❌");
+      setStatus(e?.response?.data?.detail || "Ошибка удаления");
     }
   }
 
   return (
     <div className="container">
-      <div className="page-title">Загрузка Excel-файла нагрузки</div>
+      <div className="page-title">Нагрузка</div>
 
-      {/* ЗАГРУЗКА */}
       <div className="card card-pad">
-        <div className="section-title">Учебный год</div>
-
-        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
           <input
             className="input"
             style={{ width: 200 }}
@@ -124,6 +135,7 @@ export default function ExcelUploadPage() {
             }}
             placeholder="2025-2026"
           />
+
           <div className="small">{status}</div>
         </div>
 
@@ -135,72 +147,71 @@ export default function ExcelUploadPage() {
             style={{ display: "none" }}
             onChange={(e) => setFile(e.target.files?.[0] || null)}
           />
-          <button className="btn btn-primary" onClick={() => document.getElementById("excel-file").click()}>
-            Выберите Excel
+          <button className="btn btn-primary" onClick={() => document.getElementById("excel-file").click()} disabled={uploading}>
+            Выбрать файл
           </button>
 
           <div className="small" style={{ marginTop: 10 }}>
-            {file ? `Выбран: ${file.name}` : "Файл не выбран"}
+            {file ? `Файл: ${file.name}` : "Файл не выбран"}
           </div>
         </div>
 
         <div className="actions-row">
-          <div className="small">Кафедра берётся автоматически из аккаунта.</div>
-          <button className="btn btn-primary" onClick={handleUpload}>
-            ЗАГРУЗИТЬ
-          </button>
-        </div>
-      </div>
-
-      {/* СПИСОК ФАЙЛОВ */}
-      <div className="card card-pad" style={{ marginTop: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div className="section-title">Загруженные Excel</div>
-          <button className="btn" onClick={() => loadTemplates(departmentId)} disabled={loadingList}>
-            Обновить список
+          <button className="btn btn-primary" onClick={handleUpload} disabled={uploading}>
+            {uploading ? "Загрузка..." : "Загрузить"}
           </button>
         </div>
 
-        <table style={{ width: "100%", marginTop: 12 }}>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Файл</th>
-              <th>Учебный год</th>
-              <th>Загружен</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {templates.length === 0 ? (
+        <div className="hr" style={{ marginTop: 18 }} />
+
+        <div className="section-title" style={{ marginTop: 14 }}>
+          Загруженные файлы
+        </div>
+
+        <div className="small" style={{ marginBottom: 10 }}>
+          {loadingList ? "Загрузка списка..." : ""}
+        </div>
+
+        <div className="table-wrap" style={{ overflowX: "auto" }}>
+          <table className="table" style={{ minWidth: 900 }}>
+            <thead>
               <tr>
-                <td colSpan={5} className="small">Файлов пока нет</td>
+                <th style={{ width: 160 }}>Учебный год</th>
+                <th>Файл</th>
+                <th style={{ width: 220 }}>Загружен</th>
+                <th style={{ width: 220 }}></th>
               </tr>
-            ) : (
-              templates.map((t) => (
-                <tr key={t.id}>
-                  <td>#{t.id}</td>
-                  <td>
-                    {t.source_filename}
-                    {String(selectedExcelId) === String(t.id) && (
-                      <span style={{ marginLeft: 6 }}>✅</span>
-                    )}
-                  </td>
-                  <td>{t.academic_year}</td>
-                  <td>{fmtDateTime(t.created_at)}</td>
-                  <td style={{ display: "flex", gap: 6 }}>
-                    <button className="btn" onClick={() => selectTemplate(t.id)}>
-                      Выбрать
-                    </button>
-                    <button className="btn btn-danger" onClick={() => deleteTemplate(t.id)}>
-                      Удалить
-                    </button>
-                  </td>
+            </thead>
+            <tbody>
+              {templates.length === 0 ? (
+                <tr>
+                  <td colSpan={4}>Файлов пока нет</td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : (
+                templates.map((t) => (
+                  <tr key={t.id}>
+                    <td>{t.academic_year}</td>
+                    <td>
+                      {t.source_filename || "excel.xlsx"}
+                      {String(selectedExcelId) === String(t.id) ? (
+                        <span style={{ marginLeft: 8, fontWeight: 800 }}>(выбран)</span>
+                      ) : null}
+                    </td>
+                    <td>{fmtDateTime(t.created_at)}</td>
+                    <td style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button className="btn btn-outline" onClick={() => selectTemplate(t.id)}>
+                        Выбрать
+                      </button>
+                      <button className="btn btn-danger" onClick={() => deleteTemplate(t.id)}>
+                        Удалить
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
