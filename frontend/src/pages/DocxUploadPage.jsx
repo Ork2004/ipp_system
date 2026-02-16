@@ -15,8 +15,6 @@ export default function DocxUploadPage() {
   const [academicYear, setAcademicYear] = useState(localStorage.getItem("academic_year") || "2025-2026");
 
   const [excelTemplates, setExcelTemplates] = useState([]);
-  const [selectedExcelId, setSelectedExcelId] = useState(localStorage.getItem("excel_template_id") || "");
-
   const [docxTemplates, setDocxTemplates] = useState([]);
 
   const [file, setFile] = useState(null);
@@ -24,17 +22,13 @@ export default function DocxUploadPage() {
   const [loadingList, setLoadingList] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  const selectedDocxId = localStorage.getItem("docx_template_id") || "";
-
   const excelForYear = useMemo(() => {
-    if (!academicYear) return excelTemplates;
-    return (excelTemplates || []).filter((t) => t.academic_year === academicYear);
+    return (excelTemplates || []).find((t) => String(t.academic_year) === String(academicYear)) || null;
   }, [excelTemplates, academicYear]);
 
-  function excelNameById(id) {
-    const ex = (excelTemplates || []).find((x) => String(x.id) === String(id));
-    return ex?.source_filename || "—";
-  }
+  const docxForYear = useMemo(() => {
+    return (docxTemplates || []).find((t) => String(t.academic_year) === String(academicYear)) || null;
+  }, [docxTemplates, academicYear]);
 
   async function loadExcelTemplates(depId) {
     const res = await api.get("/excel/templates", { params: { department_id: depId } });
@@ -54,6 +48,7 @@ export default function DocxUploadPage() {
     setLoadingList(true);
     try {
       await Promise.all([loadExcelTemplates(depId), loadDocxTemplates(depId)]);
+      setStatus("");
     } catch (e) {
       setStatus(e?.response?.data?.detail || "Ошибка загрузки списка");
     } finally {
@@ -71,16 +66,12 @@ export default function DocxUploadPage() {
       if (d) loadAll(d);
     };
 
-    const onFocus = () => refresh();
-    window.addEventListener("focus", onFocus);
-
-    const onVis = () => {
-      if (document.visibilityState === "visible") refresh();
-    };
+    window.addEventListener("focus", refresh);
+    const onVis = () => document.visibilityState === "visible" && refresh();
     document.addEventListener("visibilitychange", onVis);
 
     return () => {
-      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
@@ -90,8 +81,16 @@ export default function DocxUploadPage() {
       setStatus("Нет department_id. Выйди и зайди заново.");
       return;
     }
-    if (!selectedExcelId) {
-      setStatus("Сначала выбери Excel");
+    if (!academicYear) {
+      setStatus("Укажи год");
+      return;
+    }
+    if (!excelForYear) {
+      setStatus("Сначала загрузи Excel для этого года");
+      return;
+    }
+    if (docxForYear) {
+      setStatus("На этот год уже есть DOCX. Удали и загрузи заново.");
       return;
     }
     if (!file) {
@@ -106,17 +105,13 @@ export default function DocxUploadPage() {
       const form = new FormData();
       form.append("department_id", String(departmentId));
       form.append("academic_year", academicYear);
-      form.append("excel_template_id", String(selectedExcelId));
       form.append("file", file);
 
-      const res = await api.post("/docx/upload", form, {
+      await api.post("/docx/upload", form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
-      localStorage.setItem("docx_template_id", String(res.data.docx_template_id));
-      localStorage.setItem("excel_template_id", String(selectedExcelId));
       localStorage.setItem("academic_year", academicYear);
-
       setStatus("Загружено");
       setFile(null);
 
@@ -129,24 +124,13 @@ export default function DocxUploadPage() {
     }
   }
 
-  function selectDocx(id, excelId, year) {
-    localStorage.setItem("docx_template_id", String(id));
-    if (excelId) localStorage.setItem("excel_template_id", String(excelId));
-    if (year) localStorage.setItem("academic_year", String(year));
-    setStatus("Выбрано");
-  }
-
-  async function deleteDocx(id) {
-    const ok = window.confirm("Удалить выбранный шаблон?");
+  async function deleteByYear(year) {
+    const ok = window.confirm(`Удалить DOCX за ${year}?`);
     if (!ok) return;
 
     try {
-      await api.delete(`/docx/${id}`);
-
-      if (String(selectedDocxId) === String(id)) {
-        localStorage.removeItem("docx_template_id");
-      }
-
+      setStatus("Удаление...");
+      await api.delete("/docx/by-year", { params: { department_id: departmentId, academic_year: year } });
       setStatus("Удалено");
       await loadDocxTemplates(departmentId);
     } catch (e) {
@@ -172,28 +156,6 @@ export default function DocxUploadPage() {
             placeholder="2025-2026"
           />
 
-          <select
-            className="input"
-            style={{ width: 520 }}
-            value={selectedExcelId}
-            onChange={(e) => {
-              const v = e.target.value;
-              setSelectedExcelId(v);
-              localStorage.setItem("excel_template_id", v);
-            }}
-            disabled={loadingList}
-          >
-            {!excelForYear.length ? (
-              <option value="">Нет Excel</option>
-            ) : (
-              excelForYear.map((t) => (
-                <option key={t.id} value={String(t.id)}>
-                  {t.source_filename || "excel.xlsx"}
-                </option>
-              ))
-            )}
-          </select>
-
           <div className="small">{loadingList ? "Загрузка..." : status}</div>
         </div>
 
@@ -205,7 +167,11 @@ export default function DocxUploadPage() {
             style={{ display: "none" }}
             onChange={(e) => setFile(e.target.files?.[0] || null)}
           />
-          <button className="btn btn-primary" onClick={() => document.getElementById("docx-file").click()} disabled={uploading}>
+          <button
+            className="btn btn-primary"
+            onClick={() => document.getElementById("docx-file").click()}
+            disabled={uploading || !excelForYear || !!docxForYear}
+          >
             Выбрать файл
           </button>
 
@@ -215,7 +181,7 @@ export default function DocxUploadPage() {
         </div>
 
         <div className="actions-row">
-          <button className="btn btn-primary" onClick={handleUpload} disabled={uploading}>
+          <button className="btn btn-primary" onClick={handleUpload} disabled={uploading || !excelForYear || !!docxForYear}>
             {uploading ? "Загрузка..." : "Загрузить"}
           </button>
         </div>
@@ -231,38 +197,28 @@ export default function DocxUploadPage() {
         </div>
 
         <div className="table-wrap" style={{ overflowX: "auto" }}>
-          <table className="table" style={{ minWidth: 1050 }}>
+          <table className="table" style={{ minWidth: 900 }}>
             <thead>
               <tr>
                 <th style={{ width: 160 }}>Учебный год</th>
                 <th>Файл</th>
                 <th style={{ width: 220 }}>Загружен</th>
-                <th style={{ width: 260 }}>Excel</th>
                 <th style={{ width: 220 }}></th>
               </tr>
             </thead>
             <tbody>
               {docxTemplates.length === 0 ? (
                 <tr>
-                  <td colSpan={5}>Файлов пока нет</td>
+                  <td colSpan={4}>Файлов пока нет</td>
                 </tr>
               ) : (
                 docxTemplates.map((t) => (
                   <tr key={t.id}>
                     <td>{t.academic_year}</td>
-                    <td>
-                      {t.source_filename || "template.docx"}
-                      {String(selectedDocxId) === String(t.id) ? (
-                        <span style={{ marginLeft: 8, fontWeight: 800 }}>(выбран)</span>
-                      ) : null}
-                    </td>
+                    <td>{t.source_filename || "template.docx"}</td>
                     <td>{fmtDateTime(t.created_at)}</td>
-                    <td>{t.excel_template_id ? excelNameById(t.excel_template_id) : "—"}</td>
                     <td style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                      <button className="btn btn-outline" onClick={() => selectDocx(t.id, t.excel_template_id, t.academic_year)}>
-                        Выбрать
-                      </button>
-                      <button className="btn btn-danger" onClick={() => deleteDocx(t.id)}>
+                      <button className="btn btn-danger" onClick={() => deleteByYear(t.academic_year)}>
                         Удалить
                       </button>
                     </td>

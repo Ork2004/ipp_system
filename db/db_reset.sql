@@ -1,9 +1,11 @@
 -- ======================================================
--- IPP System DB Schema (NO hardcoded loops)
+-- IPP System DB Schema (ONE Excel + ONE DOCX per year)
+-- NO is_active, NO versions
 -- ======================================================
 
 DROP TABLE IF EXISTS generation_history CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
+
 DROP TABLE IF EXISTS generation_settings CASCADE;
 
 DROP TABLE IF EXISTS docx_placeholders CASCADE;
@@ -59,11 +61,11 @@ CREATE TABLE placeholder_catalog (
 );
 
 -- =========================
--- EXCEL
+-- EXCEL (ONE per dept+year)
 -- =========================
 CREATE TABLE excel_templates (
     id              BIGSERIAL PRIMARY KEY,
-    department_id   BIGINT REFERENCES departments(id) ON DELETE SET NULL,
+    department_id   BIGINT REFERENCES departments(id) ON DELETE CASCADE,
     academic_year   TEXT NOT NULL,
 
     file_path       TEXT NOT NULL,
@@ -71,16 +73,13 @@ CREATE TABLE excel_templates (
 
     column_schema   JSONB,
 
-    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
     status          TEXT NOT NULL DEFAULT 'parsed',
     error_text      TEXT,
 
-    created_at      TIMESTAMPTZ DEFAULT now()
-);
+    created_at      TIMESTAMPTZ DEFAULT now(),
 
-CREATE UNIQUE INDEX uq_excel_active_dept_year
-ON excel_templates(department_id, academic_year)
-WHERE is_active;
+    CONSTRAINT uq_excel_dept_year UNIQUE (department_id, academic_year)
+);
 
 CREATE TABLE excel_columns (
     id             BIGSERIAL PRIMARY KEY,
@@ -108,21 +107,20 @@ CREATE TABLE excel_rows (
 );
 
 -- =========================
--- DOCX
+-- DOCX (ONE per dept+year) + MUST be tied to Excel of same year
+-- Deleting Excel -> deletes DOCX via FK cascade
 -- =========================
 CREATE TABLE docx_templates (
     id                 BIGSERIAL PRIMARY KEY,
-    department_id      BIGINT REFERENCES departments(id) ON DELETE SET NULL,
+    department_id      BIGINT REFERENCES departments(id) ON DELETE CASCADE,
     academic_year      TEXT NOT NULL,
 
-    excel_template_id  BIGINT REFERENCES excel_templates(id) ON DELETE SET NULL,
+    excel_template_id  BIGINT NOT NULL REFERENCES excel_templates(id) ON DELETE CASCADE,
 
-    original_file_path TEXT NOT NULL,
-    current_file_path  TEXT NOT NULL,
+    file_path          TEXT NOT NULL,
     source_filename    TEXT,
 
     placeholder_schema JSONB,
-    version            INT NOT NULL DEFAULT 1,
 
     status             TEXT NOT NULL DEFAULT 'parsed',
     error_text         TEXT,
@@ -130,12 +128,8 @@ CREATE TABLE docx_templates (
     created_at         TIMESTAMPTZ DEFAULT now(),
     updated_at         TIMESTAMPTZ DEFAULT now(),
 
-    is_active          BOOLEAN NOT NULL DEFAULT TRUE
+    CONSTRAINT uq_docx_dept_year UNIQUE (department_id, academic_year)
 );
-
-CREATE UNIQUE INDEX uq_docx_active_dept_year
-ON docx_templates(department_id, academic_year)
-WHERE is_active;
 
 CREATE TABLE docx_placeholders (
     id               BIGSERIAL PRIMARY KEY,
@@ -151,24 +145,21 @@ CREATE UNIQUE INDEX uq_docx_placeholder_basic
 ON docx_placeholders(template_id, placeholder_name, placeholder_type);
 
 -- =========================
--- GENERATION SETTINGS (store mapping only)
+-- GENERATION SETTINGS
+-- Store mapping for Excel template (so Settings works BEFORE DOCX upload)
+-- ONE per excel_template_id
 -- =========================
 CREATE TABLE generation_settings (
-    id               BIGSERIAL PRIMARY KEY,
+    id                BIGSERIAL PRIMARY KEY,
+    excel_template_id BIGINT NOT NULL REFERENCES excel_templates(id) ON DELETE CASCADE,
 
-    excel_template_id BIGINT REFERENCES excel_templates(id) ON DELETE CASCADE,
-    docx_template_id  BIGINT REFERENCES docx_templates(id) ON DELETE CASCADE,
+    config            JSONB NOT NULL,
+    created_at        TIMESTAMPTZ DEFAULT now(),
+    updated_at        TIMESTAMPTZ DEFAULT now(),
 
-    config           JSONB NOT NULL,
-    is_active        BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at       TIMESTAMPTZ DEFAULT now(),
-
+    CONSTRAINT uq_gen_settings_excel UNIQUE (excel_template_id),
     CONSTRAINT ck_gen_settings_config CHECK (jsonb_typeof(config) = 'object')
 );
-
-CREATE UNIQUE INDEX uq_gen_settings_active_pair
-ON generation_settings(excel_template_id, docx_template_id)
-WHERE is_active;
 
 -- =========================
 -- AUTH / USERS

@@ -12,12 +12,10 @@ export default function SettingsPage() {
   const [departmentId, setDepartmentId] = useState(Number(localStorage.getItem("department_id") || 0));
 
   const [excelTemplates, setExcelTemplates] = useState([]);
-  const [docxTemplates, setDocxTemplates] = useState([]);
 
   const [academicYear, setAcademicYear] = useState(localStorage.getItem("academic_year") || "2025-2026");
 
-  const [excelTemplateId, setExcelTemplateId] = useState(localStorage.getItem("excel_template_id") || "");
-  const [docxTemplateId, setDocxTemplateId] = useState(localStorage.getItem("docx_template_id") || "");
+  const [excelTemplateId, setExcelTemplateId] = useState("");
 
   const [cols, setCols] = useState([]);
   const [settingsStatus, setSettingsStatus] = useState("");
@@ -43,21 +41,8 @@ export default function SettingsPage() {
   }, [excelTemplates, academicYear]);
 
   const excelForYear = useMemo(() => {
-    if (!academicYear) return excelTemplates;
-    return (excelTemplates || []).filter((t) => t.academic_year === academicYear);
+    return (excelTemplates || []).find((t) => String(t.academic_year) === String(academicYear)) || null;
   }, [excelTemplates, academicYear]);
-
-  function persistExcelId(v) {
-    setExcelTemplateId(v);
-    if (v) localStorage.setItem("excel_template_id", v);
-    else localStorage.removeItem("excel_template_id");
-  }
-
-  function persistDocxId(v) {
-    setDocxTemplateId(v);
-    if (v) localStorage.setItem("docx_template_id", v);
-    else localStorage.removeItem("docx_template_id");
-  }
 
   function setOne(key, value) {
     setCfg((prev) => ({ ...prev, columns: { ...prev.columns, [key]: value } }));
@@ -77,25 +62,10 @@ export default function SettingsPage() {
     }
   }
 
-  async function loadDocxTemplates(depId = departmentId) {
-    if (!depId) return;
+  async function loadColumns(exId) {
+    if (!exId) return;
     try {
-      const res = await api.get("/docx/templates", { params: { department_id: depId } });
-      setDocxTemplates(res.data || []);
-    } catch (e) {
-      console.error(e);
-      setSettingsStatus(e?.response?.data?.detail || "Ошибка загрузки DOCX");
-    }
-  }
-
-  async function loadColumns(targetExcelId) {
-    const id = targetExcelId || excelTemplateId;
-    if (!id) {
-      setSettingsStatus("Выбери Excel");
-      return;
-    }
-    try {
-      const res = await api.get(`/excel/${id}/columns`);
+      const res = await api.get(`/excel/${exId}/columns`);
       setCols(res.data || []);
     } catch (e) {
       console.error(e);
@@ -103,14 +73,11 @@ export default function SettingsPage() {
     }
   }
 
-  async function loadCurrentSettings(targetExcelId, targetDocxId) {
-    const ex = targetExcelId || excelTemplateId;
-    const dx = targetDocxId || docxTemplateId;
-    if (!ex || !dx) return;
-
+  async function loadCurrentSettingsByYear(depId, year) {
+    if (!depId || !year) return;
     try {
       const res = await api.get("/settings/current", {
-        params: { excel_template_id: ex, docx_template_id: dx },
+        params: { department_id: depId, academic_year: year },
       });
 
       if (res.data?.exists) {
@@ -139,14 +106,13 @@ export default function SettingsPage() {
     }
   }
 
-  async function loadPlaceholders(targetExcelId) {
-    const ex = targetExcelId || excelTemplateId;
-    if (!ex) {
-      setPhStatus("Выбери Excel");
+  async function loadPlaceholders(exId) {
+    if (!exId) {
+      setPhStatus("Нет Excel для этого года");
       return;
     }
     try {
-      const res = await api.get("/placeholders", { params: { excel_template_id: ex } });
+      const res = await api.get("/placeholders", { params: { excel_template_id: exId } });
       setPhData(res.data || { stable: [], dynamic: [] });
       setPhStatus("");
     } catch (e) {
@@ -155,14 +121,13 @@ export default function SettingsPage() {
     }
   }
 
-  async function loadBlocks(targetExcelId) {
-    const ex = targetExcelId || excelTemplateId;
-    if (!ex) {
-      setBlocksStatus("Выбери Excel");
+  async function loadBlocks(exId) {
+    if (!exId) {
+      setBlocksStatus("Нет Excel для этого года");
       return;
     }
     try {
-      const res = await api.get("/blocks/available", { params: { excel_template_id: ex } });
+      const res = await api.get("/blocks/available", { params: { excel_template_id: exId } });
       setBlocksData(res.data || { blocks: [], semester_map: {} });
       setBlocksStatus("");
     } catch (e) {
@@ -172,8 +137,16 @@ export default function SettingsPage() {
   }
 
   async function saveSettings() {
-    if (!excelTemplateId || !docxTemplateId) {
-      setSettingsStatus("Выбери Excel и DOCX");
+    if (!departmentId) {
+      setSettingsStatus("Нет department_id. Выйди и зайди заново.");
+      return;
+    }
+    if (!academicYear) {
+      setSettingsStatus("Укажи год");
+      return;
+    }
+    if (!excelTemplateId) {
+      setSettingsStatus("Нет Excel для этого года");
       return;
     }
 
@@ -186,8 +159,8 @@ export default function SettingsPage() {
     try {
       setSettingsStatus("Сохранение...");
       await api.post("/settings/save", {
-        excel_template_id: Number(excelTemplateId),
-        docx_template_id: Number(docxTemplateId),
+        department_id: Number(departmentId),
+        academic_year: academicYear,
         config: cfg,
       });
       setSettingsStatus("Сохранено ✅");
@@ -211,66 +184,48 @@ export default function SettingsPage() {
     const refreshAll = async () => {
       const d = Number(localStorage.getItem("department_id") || 0);
       if (!d) return;
-      await Promise.all([loadExcelTemplates(d), loadDocxTemplates(d)]);
+      await loadExcelTemplates(d);
     };
 
     refreshAll();
 
-    const onFocus = () => refreshAll();
-    window.addEventListener("focus", onFocus);
-
-    const onVis = () => {
-      if (document.visibilityState === "visible") refreshAll();
-    };
+    window.addEventListener("focus", refreshAll);
+    const onVis = () => document.visibilityState === "visible" && refreshAll();
     document.addEventListener("visibilitychange", onVis);
 
     return () => {
-      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("focus", refreshAll);
       document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
 
   useEffect(() => {
-    if (!excelTemplates.length) return;
-    const list = excelForYear;
-    if (!list.length) return;
+    const ex = excelForYear;
+    const id = ex ? String(ex.id) : "";
+    setExcelTemplateId(id);
 
-    const exists = list.some((t) => String(t.id) === String(excelTemplateId));
-    if (!exists) {
-      const first = list[0];
-      const firstId = String(first.id);
-      persistExcelId(firstId);
-
-      const y = first.academic_year || academicYear;
-      localStorage.setItem("academic_year", y);
-      setAcademicYear(y);
+    if (ex) {
+      (async () => {
+        setSettingsStatus("");
+        await loadColumns(id);
+        await loadPlaceholders(id);
+        await loadBlocks(id);
+        await loadCurrentSettingsByYear(departmentId, academicYear);
+      })();
+    } else {
+      setCols([]);
+      setPhData({ stable: [], dynamic: [] });
+      setBlocksData({ blocks: [], semester_map: {} });
+      setSettingsStatus("Нет Excel для этого года");
     }
-  }, [excelTemplates, academicYear]);
-
-  useEffect(() => {
-    if (!excelTemplateId) return;
-
-    (async () => {
-      setSettingsStatus("");
-      await loadColumns(excelTemplateId);
-      await loadPlaceholders(excelTemplateId);
-      await loadBlocks(excelTemplateId);
-      await loadCurrentSettings(excelTemplateId, docxTemplateId);
-    })();
-  }, [excelTemplateId]);
-
-  useEffect(() => {
-    if (!excelTemplateId || !docxTemplateId) return;
-    loadCurrentSettings(excelTemplateId, docxTemplateId);
-  }, [docxTemplateId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [academicYear, excelTemplates]);
 
   return (
     <div className="container">
       <div className="page-title">Настройка генерации</div>
 
       <div className="card card-pad">
-        <div className="section-title">Выбор Excel и DOCX</div>
-
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
           <select
             className="input"
@@ -290,30 +245,6 @@ export default function SettingsPage() {
             ))}
           </select>
 
-          <select className="input" style={{ width: 420 }} value={excelTemplateId} onChange={(e) => persistExcelId(e.target.value)}>
-            {!excelForYear.length ? (
-              <option value="">Нет Excel для выбранного года</option>
-            ) : (
-              excelForYear.map((t) => (
-                <option key={t.id} value={String(t.id)}>
-                  {t.source_filename || "excel.xlsx"}
-                </option>
-              ))
-            )}
-          </select>
-
-          <select className="input" style={{ width: 420 }} value={docxTemplateId} onChange={(e) => persistDocxId(e.target.value)}>
-            {!docxTemplates.length ? (
-              <option value="">Нет DOCX</option>
-            ) : (
-              docxTemplates.map((t) => (
-                <option key={t.id} value={String(t.id)}>
-                  {t.source_filename || "template.docx"} — {t.academic_year || ""}
-                </option>
-              ))
-            )}
-          </select>
-
           <div className="small">{settingsStatus}</div>
         </div>
 
@@ -323,14 +254,12 @@ export default function SettingsPage() {
           Маппинг колонок
         </div>
 
-        <SelectRow label="teacher_col (ФИО преподавателя)" value={cfg.columns.teacher_col} cols={cols} onChange={(v) => setOne("teacher_col", v)} />
-
-        <SelectRow label="staff_hours_col (штатные часы)" value={cfg.columns.staff_hours_col} cols={cols} onChange={(v) => setOne("staff_hours_col", v)} />
-
-        <SelectRow label="hourly_hours_col (почасовые часы)" value={cfg.columns.hourly_hours_col} cols={cols} onChange={(v) => setOne("hourly_hours_col", v)} />
+        <SelectRow label="teacher_col" value={cfg.columns.teacher_col} cols={cols} onChange={(v) => setOne("teacher_col", v)} />
+        <SelectRow label="staff_hours_col" value={cfg.columns.staff_hours_col} cols={cols} onChange={(v) => setOne("staff_hours_col", v)} />
+        <SelectRow label="hourly_hours_col" value={cfg.columns.hourly_hours_col} cols={cols} onChange={(v) => setOne("hourly_hours_col", v)} />
 
         <div className="actions-row" style={{ marginTop: 14 }}>
-          <button className="btn btn-primary" onClick={saveSettings}>
+          <button className="btn btn-primary" onClick={saveSettings} disabled={!excelTemplateId}>
             СОХРАНИТЬ
           </button>
         </div>
@@ -345,16 +274,13 @@ export default function SettingsPage() {
           {phStatus || blocksStatus}
         </div>
 
-        <Section title="Стабильные: teacher.*" items={grouped.stableTeacher} copyField="example" />
-        <Section title="Динамичные: row.* (из Excel)" items={grouped.dynamicRow} copyField="example" />
-        <BlocksSection title="Blocks (loops)" blocks={blocksData.blocks || []} />
+        <Section title="teacher.*" items={grouped.stableTeacher} copyField="example" />
+        <Section title="row.*" items={grouped.dynamicRow} copyField="example" />
+        <BlocksSection title="blocks" blocks={blocksData.blocks || []} />
 
         <div className="actions-row" style={{ marginTop: 16 }}>
-          <div className="small">
-            teacher.*: {(grouped.stableTeacher || []).length} | row.*: {(grouped.dynamicRow || []).length} | blocks: {(blocksData.blocks || []).length}
-          </div>
           <button className="btn btn-primary" onClick={() => navigate("/docx-upload")}>
-            ДАЛЕЕ: ЗАГРУЗИТЬ ИПП
+            ДАЛЕЕ
           </button>
         </div>
       </div>
@@ -365,9 +291,9 @@ export default function SettingsPage() {
 function SelectRow({ label, value, cols, onChange }) {
   return (
     <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-      <div style={{ width: 320, fontWeight: 700 }}>{label}</div>
-      <select className="input" style={{ width: 620 }} value={value || ""} onChange={(e) => onChange(e.target.value)}>
-        <option value="">— выбрать —</option>
+      <div style={{ width: 220, fontWeight: 700 }}>{label}</div>
+      <select className="input" style={{ width: 720 }} value={value || ""} onChange={(e) => onChange(e.target.value)}>
+        <option value="">—</option>
         {cols.map((c) => (
           <option key={c.column_name} value={c.column_name}>
             {c.header_text}
@@ -390,7 +316,7 @@ function Section({ title, items, copyField }) {
               <th>Placeholder</th>
               <th>Описание</th>
               <th>Пример</th>
-              <th style={{ width: 120 }}>Действие</th>
+              <th style={{ width: 120 }}>Copy</th>
             </tr>
           </thead>
           <tbody>
@@ -431,7 +357,7 @@ function BlocksSection({ title, blocks }) {
               <th>Block</th>
               <th>Описание</th>
               <th>Snippet</th>
-              <th style={{ width: 120 }}>Действие</th>
+              <th style={{ width: 120 }}>Copy</th>
             </tr>
           </thead>
           <tbody>

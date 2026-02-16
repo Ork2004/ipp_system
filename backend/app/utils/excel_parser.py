@@ -53,7 +53,19 @@ def _extract_headers(df: pd.DataFrame, header_row_index: int) -> List[Tuple[int,
     return headers
 
 
-def parse_excel(file_path: str, department_id: int, academic_year: str, source_filename: str | None = None) -> int:
+def parse_excel(
+    file_path: str,
+    department_id: int,
+    academic_year: str,
+    source_filename: str | None = None
+) -> int:
+    """
+    NEW RULES:
+    - 1 academic year = 1 excel template (per department)
+    - uploading is NOT allowed if excel for this year already exists (must delete first)
+    - no is_active
+    """
+
     df = pd.read_excel(file_path, header=None)
     header_row_index = _find_header_row(df)
     headers = _extract_headers(df, header_row_index)
@@ -62,23 +74,36 @@ def parse_excel(file_path: str, department_id: int, academic_year: str, source_f
     try:
         with conn:
             with conn.cursor() as cur:
-                cur.execute("""
-                    UPDATE excel_templates
-                    SET is_active = FALSE
-                    WHERE department_id = %s AND academic_year = %s AND is_active = TRUE;
-                """, (department_id, academic_year))
+                cur.execute(
+                    """
+                    SELECT id
+                    FROM excel_templates
+                    WHERE department_id = %s AND academic_year = %s
+                    LIMIT 1;
+                    """,
+                    (department_id, academic_year),
+                )
+                exists = cur.fetchone()
+                if exists:
+                    raise Exception("Excel для этого учебного года уже загружен. Удали и загрузи заново.")
 
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO excel_templates (
                         department_id, academic_year, file_path, source_filename,
-                        column_schema, is_active, status, error_text
+                        column_schema, status, error_text
                     )
-                    VALUES (%s,%s,%s,%s,%s,TRUE,'parsed',NULL)
+                    VALUES (%s,%s,%s,%s,%s,'parsed',NULL)
                     RETURNING id;
-                """, (
-                    department_id, academic_year, file_path, source_filename,
-                    json.dumps(headers, ensure_ascii=False)
-                ))
+                    """,
+                    (
+                        department_id,
+                        academic_year,
+                        file_path,
+                        source_filename,
+                        json.dumps(headers, ensure_ascii=False),
+                    ),
+                )
                 template_id = cur.fetchone()[0]
 
                 used_keys: Dict[str, int] = {}
@@ -93,10 +118,13 @@ def parse_excel(file_path: str, department_id: int, academic_year: str, source_f
                     else:
                         used_keys[base_key] = 1
 
-                    cur.execute("""
+                    cur.execute(
+                        """
                         INSERT INTO excel_columns (template_id, column_name, header_text, position_index)
                         VALUES (%s,%s,%s,%s);
-                    """, (template_id, col_key, header_text, pos))
+                        """,
+                        (template_id, col_key, header_text, pos),
+                    )
 
                 excel_rows_start = header_row_index + 1
                 row_number = 1
@@ -111,10 +139,13 @@ def parse_excel(file_path: str, department_id: int, academic_year: str, source_f
                         value = row[col_index]
                         row_dict[header_text] = None if pd.isna(value) else value
 
-                    cur.execute("""
+                    cur.execute(
+                        """
                         INSERT INTO excel_rows (template_id, teacher_id, row_number, row_data)
                         VALUES (%s, NULL, %s, %s);
-                    """, (template_id, row_number, json.dumps(row_dict, ensure_ascii=False)))
+                        """,
+                        (template_id, row_number, json.dumps(row_dict, ensure_ascii=False)),
+                    )
 
                     row_number += 1
 

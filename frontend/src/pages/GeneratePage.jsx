@@ -19,14 +19,30 @@ export default function GeneratePage() {
   const [teachers, setTeachers] = useState([]);
   const [teacherId, setTeacherId] = useState(Number(localStorage.getItem("teacher_id") || 0));
 
-  const [docxTemplates, setDocxTemplates] = useState([]);
-  const [docxTemplateId, setDocxTemplateId] = useState(localStorage.getItem("docx_template_id") || "");
-
   const [status, setStatus] = useState("");
   const [downloadUrl, setDownloadUrl] = useState("");
 
   const [hist, setHist] = useState([]);
   const [histStatus, setHistStatus] = useState("");
+
+  const [excelTemplates, setExcelTemplates] = useState([]);
+  const [docxTemplates, setDocxTemplates] = useState([]);
+
+  const years = useMemo(() => {
+    const set = new Set();
+    (excelTemplates || []).forEach((t) => t.academic_year && set.add(t.academic_year));
+    (docxTemplates || []).forEach((t) => t.academic_year && set.add(t.academic_year));
+    set.add(academicYear);
+    return Array.from(set).sort().reverse();
+  }, [excelTemplates, docxTemplates, academicYear]);
+
+  const hasExcel = useMemo(() => {
+    return (excelTemplates || []).some((t) => String(t.academic_year) === String(academicYear));
+  }, [excelTemplates, academicYear]);
+
+  const hasDocx = useMemo(() => {
+    return (docxTemplates || []).some((t) => String(t.academic_year) === String(academicYear));
+  }, [docxTemplates, academicYear]);
 
   async function loadTeachers() {
     if (role !== "admin") return;
@@ -45,18 +61,15 @@ export default function GeneratePage() {
     }
   }
 
-  async function loadDocxTemplates() {
+  async function loadYearLists() {
     if (!departmentId) return;
     try {
-      const res = await api.get("/docx/templates", { params: { department_id: departmentId } });
-      const list = res.data || [];
-      setDocxTemplates(list);
-
-      if (!docxTemplateId && list.length) {
-        const active = list.find((x) => x.is_active) || list[0];
-        setDocxTemplateId(String(active.id));
-        localStorage.setItem("docx_template_id", String(active.id));
-      }
+      const [ex, dx] = await Promise.all([
+        api.get("/excel/templates", { params: { department_id: departmentId } }),
+        api.get("/docx/templates", { params: { department_id: departmentId } }),
+      ]);
+      setExcelTemplates(ex.data || []);
+      setDocxTemplates(dx.data || []);
     } catch (e) {
       console.error(e);
     }
@@ -90,8 +103,12 @@ export default function GeneratePage() {
       setStatus("Выбери год");
       return;
     }
-    if (!docxTemplateId) {
-      setStatus("Выбери DOCX шаблон");
+    if (!hasExcel) {
+      setStatus("Нет Excel для этого года");
+      return;
+    }
+    if (!hasDocx) {
+      setStatus("Нет DOCX для этого года");
       return;
     }
     if (role === "admin" && !teacherId) {
@@ -107,7 +124,6 @@ export default function GeneratePage() {
         teacher_id: role === "admin" ? teacherId : Number(localStorage.getItem("teacher_id") || 0),
         department_id: departmentId,
         academic_year: academicYear,
-        docx_template_id: Number(docxTemplateId),
       });
 
       setStatus("Готово ✅");
@@ -124,28 +140,23 @@ export default function GeneratePage() {
   useEffect(() => {
     setDepartmentId(Number(localStorage.getItem("department_id") || 0));
     setTeacherId(Number(localStorage.getItem("teacher_id") || 0));
-    setDocxTemplateId(localStorage.getItem("docx_template_id") || "");
 
-    loadDocxTemplates();
+    loadYearLists();
     loadTeachers();
     loadHistory();
 
     const refresh = () => {
-      loadDocxTemplates();
+      loadYearLists();
       loadTeachers();
       loadHistory();
     };
 
-    const onFocus = () => refresh();
-    window.addEventListener("focus", onFocus);
-
-    const onVis = () => {
-      if (document.visibilityState === "visible") refresh();
-    };
+    window.addEventListener("focus", refresh);
+    const onVis = () => document.visibilityState === "visible" && refresh();
     document.addEventListener("visibilitychange", onVis);
 
     return () => {
-      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", onVis);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -162,36 +173,21 @@ export default function GeneratePage() {
 
       <div className="card card-pad">
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
-          <input
+          <select
             className="input"
             style={{ width: 200 }}
             value={academicYear}
             onChange={(e) => {
-              setAcademicYear(e.target.value);
-              localStorage.setItem("academic_year", e.target.value);
-            }}
-            placeholder="2025-2026"
-          />
-
-          <select
-            className="input"
-            style={{ width: 520 }}
-            value={docxTemplateId}
-            onChange={(e) => {
-              const v = e.target.value;
-              setDocxTemplateId(v);
-              localStorage.setItem("docx_template_id", v);
+              const y = e.target.value;
+              setAcademicYear(y);
+              localStorage.setItem("academic_year", y);
             }}
           >
-            {!docxTemplates.length ? (
-              <option value="">Нет DOCX шаблонов</option>
-            ) : (
-              docxTemplates.map((t) => (
-                <option key={t.id} value={String(t.id)}>
-                  {t.source_filename || "template.docx"} — {t.academic_year || ""}
-                </option>
-              ))
-            )}
+            {years.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
           </select>
 
           {role === "admin" ? (
@@ -221,17 +217,14 @@ export default function GeneratePage() {
         </div>
 
         <div className="actions-row">
-          <button className="btn btn-primary" onClick={generate}>
+          <button className="btn btn-primary" onClick={generate} disabled={!hasExcel || !hasDocx}>
             СГЕНЕРИРОВАТЬ
           </button>
         </div>
 
         {downloadUrl ? (
           <div style={{ marginTop: 14 }}>
-            <button
-              className="btn btn-outline"
-              onClick={() => window.open(`http://localhost:8000${downloadUrl}`, "_blank", "noreferrer")}
-            >
+            <button className="btn btn-outline" onClick={() => window.open(`http://localhost:8000${downloadUrl}`, "_blank", "noreferrer")}>
               Скачать результат
             </button>
           </div>

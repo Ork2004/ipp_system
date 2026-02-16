@@ -5,8 +5,7 @@ export default function WorkloadDataPage() {
   const [departmentId, setDepartmentId] = useState(Number(localStorage.getItem("department_id") || 0));
 
   const [templates, setTemplates] = useState([]);
-  const [selectedYear, setSelectedYear] = useState(localStorage.getItem("academic_year") || "");
-  const [selectedTemplateId, setSelectedTemplateId] = useState(localStorage.getItem("excel_template_id") || "");
+  const [selectedYear, setSelectedYear] = useState(localStorage.getItem("academic_year") || "2025-2026");
 
   const [headers, setHeaders] = useState([]);
   const [rows, setRows] = useState([]);
@@ -16,12 +15,12 @@ export default function WorkloadDataPage() {
 
   const years = useMemo(() => {
     const set = new Set((templates || []).map((t) => t.academic_year).filter(Boolean));
+    set.add(selectedYear);
     return Array.from(set).sort().reverse();
-  }, [templates]);
+  }, [templates, selectedYear]);
 
-  const templatesForYear = useMemo(() => {
-    if (!selectedYear) return templates;
-    return (templates || []).filter((t) => t.academic_year === selectedYear);
+  const templateForYear = useMemo(() => {
+    return (templates || []).find((t) => String(t.academic_year) === String(selectedYear)) || null;
   }, [templates, selectedYear]);
 
   async function loadTemplates(depId) {
@@ -34,15 +33,6 @@ export default function WorkloadDataPage() {
       const res = await api.get("/excel/templates", { params: { department_id: depId } });
       const list = res.data || [];
       setTemplates(list);
-
-      if (!selectedYear && list.length) {
-        const y = list[0].academic_year || "";
-        if (y) {
-          setSelectedYear(y);
-          localStorage.setItem("academic_year", y);
-        }
-      }
-
       setStatus("");
       return list;
     } catch (e) {
@@ -99,45 +89,23 @@ export default function WorkloadDataPage() {
     setDepartmentId(dep);
 
     (async () => {
-      const list = await loadTemplates(dep);
-      const savedId = localStorage.getItem("excel_template_id") || "";
-      if (savedId) {
-        setSelectedTemplateId(savedId);
-      } else {
-        if (!list.length) setSelectedTemplateId("");
-      }
+      await loadTemplates(dep);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!templates.length) return;
+    localStorage.setItem("academic_year", selectedYear);
 
-    const list = templatesForYear;
-
-    if (!list.length) {
-      setSelectedTemplateId("");
+    if (!templateForYear) {
       setHeaders([]);
       setRows([]);
-      localStorage.removeItem("excel_template_id");
       return;
     }
 
-    const exists = list.some((t) => String(t.id) === String(selectedTemplateId));
-    if (!exists) {
-      const firstId = String(list[0].id);
-      setSelectedTemplateId(firstId);
-      localStorage.setItem("excel_template_id", firstId);
-    }
+    loadPreviewAll(String(templateForYear.id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedYear, templates]);
-
-  useEffect(() => {
-    if (!selectedTemplateId) return;
-    localStorage.setItem("excel_template_id", String(selectedTemplateId));
-    loadPreviewAll(selectedTemplateId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTemplateId]);
 
   return (
     <div className="container">
@@ -149,14 +117,9 @@ export default function WorkloadDataPage() {
             className="input"
             style={{ width: 200 }}
             value={selectedYear}
-            onChange={(e) => {
-              const y = e.target.value;
-              setSelectedYear(y);
-              localStorage.setItem("academic_year", y);
-            }}
+            onChange={(e) => setSelectedYear(e.target.value)}
             disabled={loadingTemplates}
           >
-            <option value="">{loadingTemplates ? "Загрузка..." : "Год"}</option>
             {years.map((y) => (
               <option key={y} value={y}>
                 {y}
@@ -164,54 +127,16 @@ export default function WorkloadDataPage() {
             ))}
           </select>
 
-          <select
-            className="input"
-            style={{ width: 520 }}
-            value={selectedTemplateId}
-            onChange={(e) => setSelectedTemplateId(e.target.value)}
-            disabled={loadingTemplates || !templatesForYear.length}
-          >
-            {!templatesForYear.length ? (
-              <option value="">Нет файлов</option>
-            ) : (
-              templatesForYear.map((t) => (
-                <option key={t.id} value={String(t.id)}>
-                  {t.source_filename || "excel.xlsx"} {t.is_active ? "(active)" : ""}
-                </option>
-              ))
-            )}
-          </select>
-
           <div className="small">{status}</div>
         </div>
 
-        {/* ВАЖНО: горизонтальный скролл */}
         <div style={{ overflowX: "auto", borderRadius: 12 }}>
           <table className="table" style={{ minWidth: 900, tableLayout: "auto", whiteSpace: "nowrap" }}>
             <thead>
               <tr>
-                {/* sticky № */}
-                <th
-                  style={{
-                    position: "sticky",
-                    left: 0,
-                    zIndex: 3,
-                    width: 70,
-                    minWidth: 70,
-                    background: "var(--bg, #fff)",
-                  }}
-                >
-                  №
-                </th>
-
+                <th style={{ position: "sticky", left: 0, zIndex: 3, width: 70, minWidth: 70, background: "var(--bg, #fff)" }}>№</th>
                 {headers.map((h) => (
-                  <th
-                    key={h}
-                    style={{
-                      minWidth: 160, // чтобы колонки были читаемые
-                      background: "var(--bg, #fff)",
-                    }}
-                  >
+                  <th key={h} style={{ minWidth: 160, background: "var(--bg, #fff)" }}>
                     {h}
                   </th>
                 ))}
@@ -230,21 +155,9 @@ export default function WorkloadDataPage() {
               ) : (
                 rows.map((r) => (
                   <tr key={r.row_number}>
-                    {/* sticky № */}
-                    <td
-                      style={{
-                        position: "sticky",
-                        left: 0,
-                        zIndex: 2,
-                        background: "var(--bg, #fff)",
-                        fontWeight: 700,
-                        width: 70,
-                        minWidth: 70,
-                      }}
-                    >
+                    <td style={{ position: "sticky", left: 0, zIndex: 2, background: "var(--bg, #fff)", fontWeight: 700, width: 70, minWidth: 70 }}>
                       {r.row_number}
                     </td>
-
                     {headers.map((h) => (
                       <td key={h} style={{ minWidth: 160 }}>
                         {r.row_data?.[h] ?? ""}

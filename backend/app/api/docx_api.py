@@ -1,5 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import FileResponse
+from psycopg2 import errors
 
 from backend.app.database import get_connection
 from backend.app.utils.docx_store import store_docx_template
@@ -11,11 +12,22 @@ from backend.app.api.auth_api import require_roles
 router = APIRouter(prefix="/docx", tags=["DOCX"])
 
 
+def _get_excel_id_by_year(cur, department_id: int, academic_year: str) -> int:
+    cur.execute("""
+        SELECT id
+        FROM excel_templates
+        WHERE department_id=%s AND academic_year=%s;
+    """, (department_id, academic_year))
+    r = cur.fetchone()
+    if not r:
+        raise HTTPException(status_code=404, detail="Excel для этого года не найден. Сначала загрузи Excel.")
+    return int(r[0])
+
+
 @router.post("/upload")
 def upload_docx(
     department_id: int = Form(...),
     academic_year: str = Form(...),
-    excel_template_id: int = Form(...),
     file: UploadFile = File(...),
     user=Depends(require_roles("admin"))
 ):
@@ -28,24 +40,36 @@ def upload_docx(
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, department_id FROM excel_templates WHERE id=%s;", (excel_template_id,))
-            ex = cur.fetchone()
-            if not ex:
-                raise HTTPException(status_code=404, detail="Excel template не найден (excel_template_id)")
-            if ex[1] != admin_dep:
-                raise HTTPException(status_code=403, detail="Нельзя привязать DOCX к Excel другой кафедры")
+            cur.execute("""
+                SELECT id
+                FROM docx_templates
+                WHERE department_id=%s AND academic_year=%s;
+            """, (department_id, academic_year))
+            if cur.fetchone():
+                raise HTTPException(
+                    status_code=409,
+                    detail="На этот учебный год уже загружен DOCX. Удали его и загрузи новый."
+                )
+
+            excel_template_id = _get_excel_id_by_year(cur, department_id, academic_year)
     finally:
         conn.close()
 
     saved_path = save_upload_file(file, DOCX_DIR, allowed_exts={".docx"})
 
-    docx_template_id = store_docx_template(
-        file_path=saved_path,
-        department_id=department_id,
-        academic_year=academic_year,
-        excel_template_id=excel_template_id,
-        source_filename=file.filename
-    )
+    try:
+        docx_template_id = store_docx_template(
+            file_path=saved_path,
+            department_id=department_id,
+            academic_year=academic_year,
+            excel_template_id=excel_template_id,
+            source_filename=file.filename
+        )
+    except errors.UniqueViolation:
+        raise HTTPException(
+            status_code=409,
+            detail="На этот учебный год уже загружен DOCX. Удали его и загрузи новый."
+        )
 
     report = validate_docx_against_excel(docx_template_id)
 
@@ -62,13 +86,16 @@ def upload_docx(
 
 
 @router.get("/templates")
-def list_docx_templates(department_id: int):
+def list_docx_templates(department_id: int, user=Depends(require_roles("admin"))):
+    admin_dep = user.get("department_id")
+    if not admin_dep or int(department_id) != int(admin_dep):
+        raise HTTPException(status_code=403, detail="Нельзя смотреть другую кафедру")
+
     conn = get_connection()
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT id, academic_year, source_filename, current_file_path,
-                       is_active, status, created_at, version, excel_template_id
+                SELECT id, academic_year, source_filename, file_path, status, created_at, excel_template_id
                 FROM docx_templates
                 WHERE department_id = %s
                 ORDER BY academic_year DESC, created_at DESC;
@@ -80,12 +107,10 @@ def list_docx_templates(department_id: int):
                 "id": r[0],
                 "academic_year": r[1],
                 "source_filename": r[2],
-                "current_file_path": r[3],
-                "is_active": r[4],
-                "status": r[5],
-                "created_at": r[6],
-                "version": r[7],
-                "excel_template_id": r[8],
+                "file_path": r[3],
+                "status": r[4],
+                "created_at": r[5],
+                "excel_template_id": r[6],
             }
             for r in rows
         ]
@@ -93,31 +118,32 @@ def list_docx_templates(department_id: int):
         conn.close()
 
 
-@router.delete("/{docx_template_id}")
-def delete_docx_template(
-    docx_template_id: int,
+@router.delete("/by-year")
+def delete_docx_by_year(
+    department_id: int,
+    academic_year: str,
     user=Depends(require_roles("admin"))
 ):
     admin_dep = user.get("department_id")
     if not admin_dep:
         raise HTTPException(status_code=403, detail="У админа нет department_id в токене")
+    if int(department_id) != int(admin_dep):
+        raise HTTPException(status_code=403, detail="department_id должен совпадать с кафедрой админа")
 
     conn = get_connection()
     try:
         with conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT id, department_id, current_file_path
+                    SELECT id, file_path
                     FROM docx_templates
-                    WHERE id=%s;
-                """, (docx_template_id,))
+                    WHERE department_id=%s AND academic_year=%s;
+                """, (department_id, academic_year))
                 row = cur.fetchone()
                 if not row:
-                    raise HTTPException(status_code=404, detail="DOCX template не найден")
+                    raise HTTPException(status_code=404, detail="DOCX для этого года не найден")
 
-                _, dep_id, path_str = row
-                if dep_id != admin_dep:
-                    raise HTTPException(status_code=403, detail="Нельзя удалять DOCX другой кафедры")
+                docx_id, path_str = row
 
                 deleted_file = False
                 if path_str:
@@ -129,32 +155,36 @@ def delete_docx_template(
                     except Exception:
                         deleted_file = False
 
-                cur.execute("DELETE FROM docx_templates WHERE id=%s;", (docx_template_id,))
+                cur.execute("DELETE FROM docx_templates WHERE id=%s;", (docx_id,))
 
-        return {"status": "ok", "deleted_docx_template_id": docx_template_id, "deleted_file": deleted_file}
+        return {"status": "ok", "deleted_year": academic_year, "deleted_file": deleted_file}
 
     finally:
         conn.close()
 
 
-@router.get("/{docx_template_id}/download")
-def download_docx(docx_template_id: int):
+@router.get("/by-year/download")
+def download_docx_by_year(department_id: int, academic_year: str, user=Depends(require_roles("admin"))):
+    admin_dep = user.get("department_id")
+    if not admin_dep or int(department_id) != int(admin_dep):
+        raise HTTPException(status_code=403, detail="Нельзя смотреть другую кафедру")
+
     conn = get_connection()
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT current_file_path, source_filename, version
+                SELECT file_path, source_filename
                 FROM docx_templates
-                WHERE id = %s;
-            """, (docx_template_id,))
+                WHERE department_id=%s AND academic_year=%s;
+            """, (department_id, academic_year))
             row = cur.fetchone()
             if not row:
-                raise HTTPException(status_code=404, detail="DOCX template не найден")
+                raise HTTPException(status_code=404, detail="DOCX для этого года не найден")
 
-        path_str, src_name, version = row[0], row[1], row[2]
+        path_str, src_name = row[0], row[1]
         file_path = safe_resolve_in_dir(path_str, DOCX_DIR)
+        filename = src_name or f"template_{academic_year}.docx"
 
-        filename = src_name or f"template_{docx_template_id}_v{version}.docx"
         return FileResponse(
             str(file_path),
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -165,7 +195,7 @@ def download_docx(docx_template_id: int):
 
 
 @router.get("/{docx_template_id}/placeholders")
-def get_docx_placeholders(docx_template_id: int):
+def get_docx_placeholders(docx_template_id: int, user=Depends(require_roles("admin"))):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -182,5 +212,5 @@ def get_docx_placeholders(docx_template_id: int):
 
 
 @router.get("/{docx_template_id}/validate")
-def validate(docx_template_id: int):
+def validate(docx_template_id: int, user=Depends(require_roles("admin"))):
     return validate_docx_against_excel(docx_template_id)

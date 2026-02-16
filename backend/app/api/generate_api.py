@@ -35,37 +35,33 @@ def _check_admin_teacher_in_department(admin_user: dict, teacher_id: int):
             r = cur.fetchone()
             if not r:
                 raise HTTPException(status_code=404, detail="Преподаватель не найден")
-            teacher_dep = r[0]
-            if teacher_dep != dep:
+            if r[0] != dep:
                 raise HTTPException(status_code=403, detail="Нельзя генерировать для другой кафедры")
     finally:
         conn.close()
 
 
-def _get_excel_docx_ids_for_history(docx_template_id: int | None, department_id: int, academic_year: str):
+def _get_excel_docx_ids_for_history(department_id: int, academic_year: str):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            if not docx_template_id:
-                cur.execute("""
-                    SELECT id, excel_template_id
-                    FROM docx_templates
-                    WHERE department_id=%s AND academic_year=%s AND is_active=TRUE
-                    ORDER BY created_at DESC
-                    LIMIT 1;
-                """, (department_id, academic_year))
-                r = cur.fetchone()
-                if not r:
-                    return None, None
-                return r[1], r[0]
+            cur.execute("""
+                SELECT id
+                FROM excel_templates
+                WHERE department_id=%s AND academic_year=%s;
+            """, (department_id, academic_year))
+            ex = cur.fetchone()
+            excel_id = ex[0] if ex else None
 
             cur.execute("""
-                SELECT excel_template_id
+                SELECT id
                 FROM docx_templates
-                WHERE id=%s;
-            """, (docx_template_id,))
-            r = cur.fetchone()
-            return (r[0] if r else None), docx_template_id
+                WHERE department_id=%s AND academic_year=%s;
+            """, (department_id, academic_year))
+            dx = cur.fetchone()
+            docx_id = dx[0] if dx else None
+
+            return excel_id, docx_id
     finally:
         conn.close()
 
@@ -77,7 +73,6 @@ def generate_for_teacher(payload: dict, user=Depends(get_current_user)):
     teacher_id = payload.get("teacher_id")
     department_id = payload.get("department_id")
     academic_year = payload.get("academic_year")
-    docx_template_id = payload.get("docx_template_id")
 
     if not teacher_id or not department_id or not academic_year:
         raise HTTPException(status_code=400, detail="teacher_id, department_id, academic_year обязательны")
@@ -92,18 +87,13 @@ def generate_for_teacher(payload: dict, user=Depends(get_current_user)):
         if user.get("department_id") and department_id != user.get("department_id"):
             raise HTTPException(status_code=403, detail="department_id должен совпадать с кафедрой админа")
 
-    excel_template_id_hist, docx_template_id_hist = _get_excel_docx_ids_for_history(
-        int(docx_template_id) if docx_template_id else None,
-        department_id,
-        academic_year
-    )
+    excel_template_id_hist, docx_template_id_hist = _get_excel_docx_ids_for_history(department_id, academic_year)
 
     try:
         out_path = generate_docx_for_teacher(
             teacher_id=teacher_id,
             department_id=department_id,
             academic_year=academic_year,
-            docx_template_id=int(docx_template_id) if docx_template_id else None,
         )
 
         hist_id = insert_generation_history(
