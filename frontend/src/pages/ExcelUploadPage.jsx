@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 
 function fmtDateTime(v) {
@@ -20,7 +20,9 @@ export default function ExcelUploadPage() {
   const [loadingList, setLoadingList] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  const selectedExcelId = localStorage.getItem("excel_template_id");
+  const currentExcel = useMemo(() => {
+    return (templates || []).find((t) => String(t.academic_year) === String(academicYear)) || null;
+  }, [templates, academicYear]);
 
   useEffect(() => {
     const dep = Number(localStorage.getItem("department_id") || 0);
@@ -32,16 +34,12 @@ export default function ExcelUploadPage() {
       if (d) loadTemplates(d);
     };
 
-    const onFocus = () => refresh();
-    window.addEventListener("focus", onFocus);
-
-    const onVis = () => {
-      if (document.visibilityState === "visible") refresh();
-    };
+    window.addEventListener("focus", refresh);
+    const onVis = () => document.visibilityState === "visible" && refresh();
     document.addEventListener("visibilitychange", onVis);
 
     return () => {
-      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
@@ -51,6 +49,7 @@ export default function ExcelUploadPage() {
     try {
       const r = await api.get("/excel/templates", { params: { department_id: depId } });
       setTemplates(Array.isArray(r.data) ? r.data : []);
+      setStatus("");
     } catch (e) {
       setStatus(e?.response?.data?.detail || "Ошибка загрузки списка");
     } finally {
@@ -61,6 +60,14 @@ export default function ExcelUploadPage() {
   async function handleUpload() {
     if (!departmentId) {
       setStatus("Нет department_id. Выйди и зайди заново.");
+      return;
+    }
+    if (!academicYear) {
+      setStatus("Укажи год");
+      return;
+    }
+    if (currentExcel) {
+      setStatus("На этот год уже есть Excel. Удали и загрузи заново.");
       return;
     }
     if (!file) {
@@ -77,41 +84,28 @@ export default function ExcelUploadPage() {
       form.append("academic_year", academicYear);
       form.append("file", file);
 
-      const res = await api.post("/excel/upload", form, {
+      await api.post("/excel/upload", form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
-      localStorage.setItem("excel_template_id", String(res.data.excel_template_id));
       localStorage.setItem("academic_year", academicYear);
-
-      setStatus("Загружено");
       setFile(null);
-
+      setStatus("Загружено");
       await loadTemplates(departmentId);
     } catch (e) {
-      console.error(e);
       setStatus(e?.response?.data?.detail || "Ошибка загрузки");
     } finally {
       setUploading(false);
     }
   }
 
-  function selectTemplate(id) {
-    localStorage.setItem("excel_template_id", String(id));
-    setStatus("Выбрано");
-  }
-
-  async function deleteTemplate(id) {
-    const ok = window.confirm("Удалить выбранную нагрузку?");
+  async function deleteByYear(year) {
+    const ok = window.confirm(`Удалить Excel за ${year}? (DOCX этого года тоже удалится)`);
     if (!ok) return;
 
     try {
-      await api.delete(`/excel/${id}`);
-
-      if (String(selectedExcelId) === String(id)) {
-        localStorage.removeItem("excel_template_id");
-      }
-
+      setStatus("Удаление...");
+      await api.delete("/excel/by-year", { params: { department_id: departmentId, academic_year: year } });
       setStatus("Удалено");
       await loadTemplates(departmentId);
     } catch (e) {
@@ -135,7 +129,6 @@ export default function ExcelUploadPage() {
             }}
             placeholder="2025-2026"
           />
-
           <div className="small">{status}</div>
         </div>
 
@@ -147,7 +140,11 @@ export default function ExcelUploadPage() {
             style={{ display: "none" }}
             onChange={(e) => setFile(e.target.files?.[0] || null)}
           />
-          <button className="btn btn-primary" onClick={() => document.getElementById("excel-file").click()} disabled={uploading}>
+          <button
+            className="btn btn-primary"
+            onClick={() => document.getElementById("excel-file").click()}
+            disabled={uploading || !!currentExcel}
+          >
             Выбрать файл
           </button>
 
@@ -157,7 +154,7 @@ export default function ExcelUploadPage() {
         </div>
 
         <div className="actions-row">
-          <button className="btn btn-primary" onClick={handleUpload} disabled={uploading}>
+          <button className="btn btn-primary" onClick={handleUpload} disabled={uploading || !!currentExcel}>
             {uploading ? "Загрузка..." : "Загрузить"}
           </button>
         </div>
@@ -191,18 +188,10 @@ export default function ExcelUploadPage() {
                 templates.map((t) => (
                   <tr key={t.id}>
                     <td>{t.academic_year}</td>
-                    <td>
-                      {t.source_filename || "excel.xlsx"}
-                      {String(selectedExcelId) === String(t.id) ? (
-                        <span style={{ marginLeft: 8, fontWeight: 800 }}>(выбран)</span>
-                      ) : null}
-                    </td>
+                    <td>{t.source_filename || "excel.xlsx"}</td>
                     <td>{fmtDateTime(t.created_at)}</td>
                     <td style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                      <button className="btn btn-outline" onClick={() => selectTemplate(t.id)}>
-                        Выбрать
-                      </button>
-                      <button className="btn btn-danger" onClick={() => deleteTemplate(t.id)}>
+                      <button className="btn btn-danger" onClick={() => deleteByYear(t.academic_year)}>
                         Удалить
                       </button>
                     </td>
@@ -216,3 +205,4 @@ export default function ExcelUploadPage() {
     </div>
   );
 }
+

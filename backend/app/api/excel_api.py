@@ -1,10 +1,10 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
-from pathlib import Path
+from psycopg2 import errors
 
 from backend.app.database import get_connection
 from backend.app.utils.excel_parser import parse_excel
 from backend.app.utils.storage import save_upload_file, safe_resolve_in_dir
-from backend.app.config import EXCEL_DIR
+from backend.app.config import EXCEL_DIR, DOCX_DIR
 from backend.app.api.auth_api import require_roles
 
 router = APIRouter(prefix="/excel", tags=["Excel"])
@@ -17,18 +17,44 @@ def upload_excel(
     file: UploadFile = File(...),
     user=Depends(require_roles("admin"))
 ):
+    admin_dep = user.get("department_id")
+    if not admin_dep:
+        raise HTTPException(status_code=403, detail="У админа нет department_id в токене")
+    if int(department_id) != int(admin_dep):
+        raise HTTPException(status_code=403, detail="department_id должен совпадать с кафедрой админа")
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id FROM excel_templates
+                WHERE department_id=%s AND academic_year=%s;
+            """, (department_id, academic_year))
+            if cur.fetchone():
+                raise HTTPException(
+                    status_code=409,
+                    detail="На этот учебный год уже загружен Excel. Удали его в списке и загрузи новый."
+                )
+    finally:
+        conn.close()
+
     saved_path = save_upload_file(file, EXCEL_DIR, allowed_exts={".xlsx", ".xls"})
 
-    excel_template_id = parse_excel(
-        saved_path,
-        department_id,
-        academic_year,
-        source_filename=file.filename
-    )
+    try:
+        excel_template_id = parse_excel(
+            saved_path,
+            department_id,
+            academic_year,
+            source_filename=file.filename
+        )
+    except errors.UniqueViolation:
+        raise HTTPException(
+            status_code=409,
+            detail="На этот учебный год уже загружен Excel. Удали его и загрузи новый."
+        )
 
     return {
         "status": "ok",
-        "type": "excel",
         "department_id": department_id,
         "academic_year": academic_year,
         "original_filename": file.filename,
@@ -38,12 +64,16 @@ def upload_excel(
 
 
 @router.get("/templates")
-def list_excel_templates(department_id: int):
+def list_excel_templates(department_id: int, user=Depends(require_roles("admin"))):
+    admin_dep = user.get("department_id")
+    if not admin_dep or int(department_id) != int(admin_dep):
+        raise HTTPException(status_code=403, detail="Нельзя смотреть другую кафедру")
+
     conn = get_connection()
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT id, academic_year, source_filename, file_path, is_active, status, created_at
+                SELECT id, academic_year, source_filename, file_path, status, created_at
                 FROM excel_templates
                 WHERE department_id = %s
                 ORDER BY academic_year DESC, created_at DESC;
@@ -56,9 +86,8 @@ def list_excel_templates(department_id: int):
                 "academic_year": r[1],
                 "source_filename": r[2],
                 "file_path": r[3],
-                "is_active": r[4],
-                "status": r[5],
-                "created_at": r[6],
+                "status": r[4],
+                "created_at": r[5],
             }
             for r in rows
         ]
@@ -67,7 +96,7 @@ def list_excel_templates(department_id: int):
 
 
 @router.get("/{excel_template_id}/preview")
-def preview_excel(excel_template_id: int, limit: int = 30, offset: int = 0):
+def preview_excel(excel_template_id: int, limit: int = 30, offset: int = 0, user=Depends(require_roles("admin"))):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -104,7 +133,7 @@ def preview_excel(excel_template_id: int, limit: int = 30, offset: int = 0):
 
 
 @router.get("/{excel_template_id}/columns")
-def get_excel_columns(excel_template_id: int):
+def get_excel_columns(excel_template_id: int, user=Depends(require_roles("admin"))):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -130,45 +159,69 @@ def get_excel_columns(excel_template_id: int):
         conn.close()
 
 
-@router.delete("/{excel_template_id}")
-def delete_excel_template(
-    excel_template_id: int,
+@router.delete("/by-year")
+def delete_excel_by_year(
+    department_id: int,
+    academic_year: str,
     user=Depends(require_roles("admin"))
 ):
     admin_dep = user.get("department_id")
     if not admin_dep:
         raise HTTPException(status_code=403, detail="У админа нет department_id в токене")
+    if int(department_id) != int(admin_dep):
+        raise HTTPException(status_code=403, detail="department_id должен совпадать с кафедрой админа")
 
     conn = get_connection()
     try:
         with conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT id, department_id, file_path
+                    SELECT id, file_path
                     FROM excel_templates
-                    WHERE id=%s;
-                """, (excel_template_id,))
-                row = cur.fetchone()
-                if not row:
-                    raise HTTPException(status_code=404, detail="Excel template не найден")
+                    WHERE department_id=%s AND academic_year=%s;
+                """, (department_id, academic_year))
+                ex = cur.fetchone()
+                if not ex:
+                    raise HTTPException(status_code=404, detail="Excel для этого года не найден")
 
-                _, dep_id, file_path = row
-                if dep_id != admin_dep:
-                    raise HTTPException(status_code=403, detail="Нельзя удалять Excel другой кафедры")
+                excel_id, excel_path = ex
 
-                deleted_file = False
-                if file_path:
+                cur.execute("""
+                    SELECT file_path
+                    FROM docx_templates
+                    WHERE department_id=%s AND academic_year=%s;
+                """, (department_id, academic_year))
+                dx = cur.fetchone()
+                docx_path = dx[0] if dx else None
+
+                deleted_excel_file = False
+                deleted_docx_file = False
+
+                if excel_path:
                     try:
-                        p = safe_resolve_in_dir(file_path, EXCEL_DIR)
+                        p = safe_resolve_in_dir(excel_path, EXCEL_DIR)
                         if p.exists() and p.is_file():
                             p.unlink()
-                            deleted_file = True
+                            deleted_excel_file = True
                     except Exception:
-                        deleted_file = False
+                        deleted_excel_file = False
 
-                cur.execute("DELETE FROM excel_templates WHERE id=%s;", (excel_template_id,))
+                if docx_path:
+                    try:
+                        p = safe_resolve_in_dir(docx_path, DOCX_DIR)
+                        if p.exists() and p.is_file():
+                            p.unlink()
+                            deleted_docx_file = True
+                    except Exception:
+                        deleted_docx_file = False
 
-        return {"status": "ok", "deleted_excel_template_id": excel_template_id, "deleted_file": deleted_file}
+                cur.execute("DELETE FROM excel_templates WHERE id=%s;", (excel_id,))
 
+        return {
+            "status": "ok",
+            "deleted_year": academic_year,
+            "deleted_excel_file": deleted_excel_file,
+            "deleted_docx_file": deleted_docx_file
+        }
     finally:
         conn.close()

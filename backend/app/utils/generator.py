@@ -29,42 +29,40 @@ def _get_teacher(cur, teacher_id: int) -> dict:
     }
 
 
-def _resolve_active_docx(cur, department_id: int, academic_year: str) -> int:
+def _get_excel_by_year(cur, department_id: int, academic_year: str) -> dict:
     cur.execute("""
-        SELECT id FROM docx_templates
-        WHERE department_id=%s AND academic_year=%s AND is_active=TRUE
-        ORDER BY created_at DESC
-        LIMIT 1;
+        SELECT id
+        FROM excel_templates
+        WHERE department_id=%s AND academic_year=%s;
     """, (department_id, academic_year))
     r = cur.fetchone()
     if not r:
-        raise Exception("Не найден active DOCX шаблон для кафедры/года")
-    return r[0]
+        raise Exception("Для этого года Excel не загружен")
+    return {"id": r[0]}
 
 
-def _get_docx_info(cur, docx_template_id: int) -> dict:
+def _get_docx_by_year(cur, department_id: int, academic_year: str) -> dict:
     cur.execute("""
-        SELECT id, current_file_path, excel_template_id
+        SELECT id, file_path, excel_template_id
         FROM docx_templates
-        WHERE id=%s;
-    """, (docx_template_id,))
+        WHERE department_id=%s AND academic_year=%s;
+    """, (department_id, academic_year))
     r = cur.fetchone()
     if not r:
-        raise Exception("DOCX template не найден")
+        raise Exception("Для этого года DOCX не загружен")
     return {"id": r[0], "tpl_path": r[1], "excel_template_id": r[2]}
 
 
-def _get_active_settings(cur, excel_template_id: int, docx_template_id: int) -> dict:
+def _get_settings_for_excel(cur, excel_template_id: int) -> dict:
     cur.execute("""
         SELECT config
         FROM generation_settings
-        WHERE excel_template_id=%s AND docx_template_id=%s AND is_active=TRUE
-        ORDER BY created_at DESC
+        WHERE excel_template_id=%s
         LIMIT 1;
-    """, (excel_template_id, docx_template_id))
+    """, (excel_template_id,))
     r = cur.fetchone()
     if not r:
-        raise Exception("Нет активных настроек для этой пары Excel+DOCX. Сначала сохрани настройки.")
+        raise Exception("Нет настроек для этого Excel. Сначала сохрани Settings.")
     return r[0]
 
 
@@ -108,21 +106,17 @@ def generate_docx_for_teacher(
     teacher_id: int,
     department_id: int,
     academic_year: str,
-    docx_template_id: int | None = None,
 ) -> str:
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            if docx_template_id is None:
-                docx_template_id = _resolve_active_docx(cur, department_id, academic_year)
+            excel = _get_excel_by_year(cur, department_id, academic_year)
+            docx = _get_docx_by_year(cur, department_id, academic_year)
 
-            docx_info = _get_docx_info(cur, docx_template_id)
-            tpl_path = docx_info["tpl_path"]
-            excel_template_id = docx_info["excel_template_id"]
-            if not excel_template_id:
-                raise Exception("DOCX не связан с Excel (excel_template_id = NULL). Загрузи DOCX с выбранным Excel.")
+            if int(docx["excel_template_id"]) != int(excel["id"]):
+                raise Exception("DOCX привязан не к тому Excel. Удали DOCX и загрузи заново для этого года.")
 
-            settings = _get_active_settings(cur, excel_template_id, docx_template_id)
+            settings = _get_settings_for_excel(cur, excel["id"])
             cols_cfg = (settings or {}).get("columns") or {}
 
             teacher_col = cols_cfg.get("teacher_col")
@@ -134,7 +128,7 @@ def generate_docx_for_teacher(
 
             teacher = _get_teacher(cur, teacher_id)
 
-            mapping = _get_excel_mapping(cur, excel_template_id)
+            mapping = _get_excel_mapping(cur, excel["id"])
             col_to_header = mapping["col_to_header"]
             excel_columns = mapping["columns"]
 
@@ -142,8 +136,8 @@ def generate_docx_for_teacher(
             if not semester_map:
                 raise Exception("Не найдены колонки семестров в Excel (например '1 сем', '2 сем', '3 сем').")
 
-            excel_rows = _get_excel_rows(cur, excel_template_id)
-            loop_keys = _get_docx_loop_keys(cur, docx_template_id)
+            excel_rows = _get_excel_rows(cur, excel["id"])
+            loop_keys = _get_docx_loop_keys(cur, docx["id"])
 
             blocks: Dict[str, Any] = {}
 
@@ -168,12 +162,9 @@ def generate_docx_for_teacher(
                     node = node.setdefault(p, {})
                 node[parts[-1]] = rows
 
-            context = {
-                "teacher": teacher,
-                "blocks": blocks,
-            }
+            context = {"teacher": teacher, "blocks": blocks}
 
-        tpl = DocxTemplate(tpl_path)
+        tpl = DocxTemplate(docx["tpl_path"])
         tpl.render(context)
 
         safe_name = re.sub(r"[^0-9A-Za-zА-Яа-я_]+", "_", teacher["full_name"]).strip("_")

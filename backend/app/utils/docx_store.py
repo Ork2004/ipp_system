@@ -1,5 +1,4 @@
 from psycopg2.extras import Json
-
 from backend.app.database import get_connection
 from backend.app.utils.docx_parser import analyze_docx
 
@@ -18,25 +17,19 @@ def store_docx_template(
         with conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    UPDATE docx_templates
-                    SET is_active = FALSE
-                    WHERE department_id=%s AND academic_year=%s AND is_active=TRUE;
-                """, (department_id, academic_year))
-
-                cur.execute("""
                     INSERT INTO docx_templates(
                         department_id, academic_year,
                         excel_template_id,
-                        original_file_path, current_file_path, source_filename,
-                        placeholder_schema, version,
-                        status, error_text, is_active
+                        file_path, source_filename,
+                        placeholder_schema,
+                        status, error_text
                     )
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,1,'parsed',NULL,TRUE)
+                    VALUES (%s,%s,%s,%s,%s,%s,'parsed',NULL)
                     RETURNING id;
                 """, (
                     department_id, academic_year,
                     excel_template_id,
-                    file_path, file_path, source_filename,
+                    file_path, source_filename,
                     Json(placeholder_schema),
                 ))
                 docx_template_id = cur.fetchone()[0]
