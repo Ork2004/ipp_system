@@ -10,6 +10,17 @@ function fmtDateTime(v) {
   }
 }
 
+function downloadBlob(blob, filename) {
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename || "file";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+}
+
 export default function ExcelUploadPage() {
   const [academicYear, setAcademicYear] = useState(localStorage.getItem("academic_year") || "2025-2026");
   const [file, setFile] = useState(null);
@@ -113,6 +124,23 @@ export default function ExcelUploadPage() {
     }
   }
 
+  async function downloadByYear(year, filenameFromRow) {
+    if (!departmentId) return;
+    try {
+      setStatus("Скачивание...");
+      const res = await api.get("/excel/by-year/download", {
+        params: { department_id: departmentId, academic_year: year },
+        responseType: "blob",
+      });
+
+      const fname = filenameFromRow || `excel_${year}.xlsx`;
+      downloadBlob(res.data, fname);
+      setStatus("");
+    } catch (e) {
+      setStatus(e?.response?.data?.detail || "Ошибка скачивания");
+    }
+  }
+
   return (
     <div className="container">
       <div className="page-title">Нагрузка</div>
@@ -140,11 +168,7 @@ export default function ExcelUploadPage() {
             style={{ display: "none" }}
             onChange={(e) => setFile(e.target.files?.[0] || null)}
           />
-          <button
-            className="btn btn-primary"
-            onClick={() => document.getElementById("excel-file").click()}
-            disabled={uploading || !!currentExcel}
-          >
+          <button className="btn btn-primary" onClick={() => document.getElementById("excel-file").click()} disabled={uploading || !!currentExcel}>
             Выбрать файл
           </button>
 
@@ -170,13 +194,13 @@ export default function ExcelUploadPage() {
         </div>
 
         <div className="table-wrap" style={{ overflowX: "auto" }}>
-          <table className="table" style={{ minWidth: 900 }}>
+          <table className="table" style={{ minWidth: 980 }}>
             <thead>
               <tr>
                 <th style={{ width: 160 }}>Учебный год</th>
                 <th>Файл</th>
                 <th style={{ width: 220 }}>Загружен</th>
-                <th style={{ width: 220 }}></th>
+                <th style={{ width: 320 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -191,6 +215,9 @@ export default function ExcelUploadPage() {
                     <td>{t.source_filename || "excel.xlsx"}</td>
                     <td>{fmtDateTime(t.created_at)}</td>
                     <td style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button className="btn btn-outline" onClick={() => downloadByYear(t.academic_year, t.source_filename)}>
+                        Скачать
+                      </button>
                       <button className="btn btn-danger" onClick={() => deleteByYear(t.academic_year)}>
                         Удалить
                       </button>
@@ -205,4 +232,3 @@ export default function ExcelUploadPage() {
     </div>
   );
 }
-

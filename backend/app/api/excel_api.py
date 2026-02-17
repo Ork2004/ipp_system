@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
+from fastapi.responses import FileResponse
 from psycopg2 import errors
 
 from backend.app.database import get_connection
@@ -91,6 +92,41 @@ def list_excel_templates(department_id: int, user=Depends(require_roles("admin")
             }
             for r in rows
         ]
+    finally:
+        conn.close()
+
+
+@router.get("/by-year/download")
+def download_excel_by_year(department_id: int, academic_year: str, user=Depends(require_roles("admin"))):
+    admin_dep = user.get("department_id")
+    if not admin_dep or int(department_id) != int(admin_dep):
+        raise HTTPException(status_code=403, detail="Нельзя смотреть другую кафедру")
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT file_path, source_filename
+                FROM excel_templates
+                WHERE department_id=%s AND academic_year=%s;
+            """, (department_id, academic_year))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Excel для этого года не найден")
+
+        path_str, src_name = row[0], row[1]
+        file_path = safe_resolve_in_dir(path_str, EXCEL_DIR)
+        filename = src_name or f"excel_{academic_year}.xlsx"
+
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        if filename.lower().endswith(".xls"):
+            media = "application/vnd.ms-excel"
+
+        return FileResponse(
+            str(file_path),
+            media_type=media,
+            filename=filename
+        )
     finally:
         conn.close()
 
