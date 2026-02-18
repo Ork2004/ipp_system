@@ -2,7 +2,7 @@
   min-height: calc(100vh - 64px); /* navbar = 64px */
   display: grid;
   place-items: center;
-  padding: 0 24px;
+  padding: 28px 24px;
 }
 
 .login-center{
@@ -12,71 +12,88 @@
 }
 
 .login-card{
-  width: min(560px, 100%);
-  border-radius: 22px;
-  transform: translateY(-10px);
+  width: min(520px, 100%);
+  border-radius: 16px;
+  transform: none;
+  box-shadow: 0 14px 34px rgba(15,23,42,.10);
+  border: 1px solid rgba(15,23,42,.10);
 }
 
 .login-header{
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
+  margin-bottom: 6px;
 }
 
 .login-logo{
-  width: 52px;
-  height: 52px;
-  border-radius: 16px;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
   display: grid;
   place-items: center;
-  font-weight: 900;
+  font-weight: 700;
   letter-spacing: -0.02em;
-  color: #1d4ed8;
-  background: linear-gradient(180deg, rgba(255,255,255,.95), rgba(255,255,255,.75));
-  border: 1px solid rgba(37, 99, 235, .22);
-  box-shadow: 0 10px 20px rgba(37,99,235,.08);
+  color: #1e4fd7;
+
+  background: linear-gradient(180deg, #ffffff 0%, #f3f7ff 100%);
+  border: 1px solid rgba(47,107,255,.22);
+  box-shadow: 0 8px 18px rgba(47,107,255,.12);
 }
 
 .login-headtext{
   display: grid;
-  gap: 4px;
+  gap: 2px;
 }
 
 .login-title{
-  font-size: 26px;
-  font-weight: 900;
+  font-size: 22px;
+  font-weight: 700;
   letter-spacing: -0.02em;
   margin: 0;
+  color: #0f172a;
+}
+
+/* если у тебя есть подзаголовок (small текст) — будет мягко смотреться */
+.login-subtitle{
+  margin: 0;
+  font-size: 13px;
+  color: #64748b;
 }
 
 .login-form{
   display: grid;
-  gap: 14px;
-  margin-top: 6px;
+  gap: 12px;
+  margin-top: 10px;
 }
 
 .login-field{
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .login-label{
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
   color: #334155;
 }
 
 .login-error{
   background: rgba(239, 68, 68, 0.10);
-  border: 1px solid rgba(239, 68, 68, 0.25);
+  border: 1px solid rgba(239, 68, 68, 0.22);
   color: #991b1b;
   border-radius: 12px;
   padding: 10px 12px;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .login-actions{
-  margin-top: 2px;
+  margin-top: 6px;
+  display: flex;
+  gap: 10px;
   align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
 }
+
