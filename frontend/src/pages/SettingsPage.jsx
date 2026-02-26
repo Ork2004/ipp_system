@@ -10,21 +10,38 @@ export default function SettingsPage() {
   const navigate = useNavigate();
 
   const [departmentId, setDepartmentId] = useState(Number(localStorage.getItem("department_id") || 0));
-
   const [excelTemplates, setExcelTemplates] = useState([]);
-
   const [academicYear, setAcademicYear] = useState(localStorage.getItem("academic_year") || "2025-2026");
-
   const [excelTemplateId, setExcelTemplateId] = useState("");
 
   const [cols, setCols] = useState([]);
   const [settingsStatus, setSettingsStatus] = useState("");
+
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const [cfg, setCfg] = useState({
     columns: {
       teacher_col: "",
       staff_hours_col: "",
       hourly_hours_col: "",
+
+      discipline_col: "",
+      activity_type_col: "",
+      group_col: "",
+      op_col: "",
+    },
+    activity_types: {
+      lecture: ["лек", "лк", "lecture"],
+      lab_practice: ["лаб", "пра", "lab", "pract"],
+    },
+    merge_rules: {
+      key_cols: ["distsiplina", "op"],
+      group_join: ", ",
+      group_priority_type: "lecture",
+      sum_cols_by_type: {
+        lecture: ["l", "srsp", "ekzameny"],
+        lab_practice: ["spz", "lz", "rk_1_2"],
+      },
     },
   });
 
@@ -44,8 +61,46 @@ export default function SettingsPage() {
     return (excelTemplates || []).find((t) => String(t.academic_year) === String(academicYear)) || null;
   }, [excelTemplates, academicYear]);
 
-  function setOne(key, value) {
+  const colOptions = useMemo(() => (cols || []).map((c) => c.column_name), [cols]);
+
+  function setCol(key, value) {
     setCfg((prev) => ({ ...prev, columns: { ...prev.columns, [key]: value } }));
+  }
+
+  function setActivityPatterns(typeKey, text) {
+    const arr = String(text || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    setCfg((prev) => ({
+      ...prev,
+      activity_types: {
+        ...(prev.activity_types || {}),
+        [typeKey]: arr,
+      },
+    }));
+  }
+
+  function setMergeRule(key, value) {
+    setCfg((prev) => ({ ...prev, merge_rules: { ...(prev.merge_rules || {}), [key]: value } }));
+  }
+
+  function setMergeRuleArray(key, arr) {
+    setCfg((prev) => ({ ...prev, merge_rules: { ...(prev.merge_rules || {}), [key]: arr } }));
+  }
+
+  function setSumColsByType(typeKey, arr) {
+    setCfg((prev) => ({
+      ...prev,
+      merge_rules: {
+        ...(prev.merge_rules || {}),
+        sum_cols_by_type: {
+          ...((prev.merge_rules || {}).sum_cols_by_type || {}),
+          [typeKey]: arr,
+        },
+      },
+    }));
   }
 
   async function loadExcelTemplates(depId = departmentId) {
@@ -76,30 +131,40 @@ export default function SettingsPage() {
   async function loadCurrentSettingsByYear(depId, year) {
     if (!depId || !year) return;
     try {
-      const res = await api.get("/settings/current", {
-        params: { department_id: depId, academic_year: year },
-      });
+      const res = await api.get("/settings/current", { params: { department_id: depId, academic_year: year } });
 
       if (res.data?.exists) {
         const loaded = res.data.config || {};
         const c = loaded.columns || {};
+        const at = loaded.activity_types || {};
+        const mr = loaded.merge_rules || {};
+        const sct = mr.sum_cols_by_type || {};
+
         setCfg({
-          ...loaded,
           columns: {
             teacher_col: c.teacher_col || "",
             staff_hours_col: c.staff_hours_col || "",
             hourly_hours_col: c.hourly_hours_col || "",
+
+            discipline_col: c.discipline_col || "",
+            activity_type_col: c.activity_type_col || "",
+            group_col: c.group_col || "",
+            op_col: c.op_col || "",
+          },
+          activity_types: {
+            lecture: Array.isArray(at.lecture) ? at.lecture : ["лек", "лк", "lecture"],
+            lab_practice: Array.isArray(at.lab_practice) ? at.lab_practice : ["лаб", "пра", "lab", "pract"],
+          },
+          merge_rules: {
+            key_cols: Array.isArray(mr.key_cols) ? mr.key_cols : ["distsiplina", "op"],
+            group_join: mr.group_join || ", ",
+            group_priority_type: mr.group_priority_type || "lecture",
+            sum_cols_by_type: {
+              lecture: Array.isArray(sct.lecture) ? sct.lecture : ["l", "srsp", "ekzameny"],
+              lab_practice: Array.isArray(sct.lab_practice) ? sct.lab_practice : ["spz", "lz", "rk_1_2"],
+            },
           },
         });
-      } else {
-        setCfg((prev) => ({
-          ...prev,
-          columns: {
-            teacher_col: prev.columns.teacher_col || "",
-            staff_hours_col: prev.columns.staff_hours_col || "",
-            hourly_hours_col: prev.columns.hourly_hours_col || "",
-          },
-        }));
       }
     } catch (e) {
       console.error(e);
@@ -137,23 +202,26 @@ export default function SettingsPage() {
   }
 
   async function saveSettings() {
-    if (!departmentId) {
-      setSettingsStatus("Нет department_id. Выйди и зайди заново.");
-      return;
-    }
-    if (!academicYear) {
-      setSettingsStatus("Укажи год");
-      return;
-    }
-    if (!excelTemplateId) {
-      setSettingsStatus("Нет Excel для этого года");
-      return;
-    }
+    if (!departmentId) return setSettingsStatus("Нет department_id. Выйди и зайди заново.");
+    if (!academicYear) return setSettingsStatus("Укажи год");
+    if (!excelTemplateId) return setSettingsStatus("Нет Excel для этого года");
 
     const c = cfg.columns || {};
-    if (!c.teacher_col || !c.staff_hours_col) {
-      setSettingsStatus("Обязательные: teacher_col и staff_hours_col");
-      return;
+    if (!c.teacher_col || !c.staff_hours_col) return setSettingsStatus("Обязательные: ФИО преподавателя и Штатные часы");
+    if (!c.discipline_col || !c.activity_type_col || !c.group_col) {
+      return setSettingsStatus("Обязательные: Дисциплина, Вид занятий, Группа");
+    }
+
+    const mr = cfg.merge_rules || {};
+    const sct = mr.sum_cols_by_type || {};
+    if (!Array.isArray(mr.key_cols) || !mr.key_cols.length) {
+      return setSettingsStatus("Расширенные: не задано “по каким колонкам объединять дисциплину”");
+    }
+
+    const lectureArr = Array.isArray(sct.lecture) ? sct.lecture : [];
+    const labArr = Array.isArray(sct.lab_practice) ? sct.lab_practice : [];
+    if (!lectureArr.length && !labArr.length) {
+      return setSettingsStatus("Расширенные: выбери колонки для суммирования");
     }
 
     try {
@@ -197,6 +265,7 @@ export default function SettingsPage() {
       window.removeEventListener("focus", refreshAll);
       document.removeEventListener("visibilitychange", onVis);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -251,17 +320,92 @@ export default function SettingsPage() {
         <div className="hr" />
 
         <div className="section-title" style={{ marginTop: 14 }}>
-          Маппинг колонок
+          Маппинг колонок (обязательно)
         </div>
 
-        <SelectRow label="teacher_col" value={cfg.columns.teacher_col} cols={cols} onChange={(v) => setOne("teacher_col", v)} />
-        <SelectRow label="staff_hours_col" value={cfg.columns.staff_hours_col} cols={cols} onChange={(v) => setOne("staff_hours_col", v)} />
-        <SelectRow label="hourly_hours_col" value={cfg.columns.hourly_hours_col} cols={cols} onChange={(v) => setOne("hourly_hours_col", v)} />
+        <SelectRow label="ФИО преподавателя" value={cfg.columns.teacher_col} cols={cols} onChange={(v) => setCol("teacher_col", v)} />
+        <SelectRow label="Штатные часы" value={cfg.columns.staff_hours_col} cols={cols} onChange={(v) => setCol("staff_hours_col", v)} />
+        <SelectRow
+          label="Почасовые часы (если есть)"
+          value={cfg.columns.hourly_hours_col}
+          cols={cols}
+          onChange={(v) => setCol("hourly_hours_col", v)}
+        />
 
-        <div className="actions-row" style={{ marginTop: 14 }}>
-          <button className="btn btn-primary" onClick={saveSettings} disabled={!excelTemplateId}>
-            СОХРАНИТЬ
+        <SelectRow label="Дисциплина" value={cfg.columns.discipline_col} cols={cols} onChange={(v) => setCol("discipline_col", v)} />
+        <SelectRow label="Вид занятий" value={cfg.columns.activity_type_col} cols={cols} onChange={(v) => setCol("activity_type_col", v)} />
+        <SelectRow label="Группа" value={cfg.columns.group_col} cols={cols} onChange={(v) => setCol("group_col", v)} />
+        <SelectRow label="ОП / программа (если есть)" value={cfg.columns.op_col} cols={cols} onChange={(v) => setCol("op_col", v)} />
+
+        <div className="hr" />
+
+        <div className="section-title" style={{ marginTop: 14 }}>
+          Названия видов занятий (через запятую)
+        </div>
+
+        <TextRow
+          label="Лекции"
+          value={(cfg.activity_types?.lecture || []).join(", ")}
+          onChange={(v) => setActivityPatterns("lecture", v)}
+          placeholder="лек, лк, lecture"
+        />
+        <TextRow
+          label="Лаб/практики"
+          value={(cfg.activity_types?.lab_practice || []).join(", ")}
+          onChange={(v) => setActivityPatterns("lab_practice", v)}
+          placeholder="лаб, пра, lab, pract"
+        />
+
+        <div className="hr" style={{ marginTop: 18 }} />
+
+        <div style={{ marginTop: 6 }}>
+          <button className="btn btn-outline" onClick={() => setAdvancedOpen((v) => !v)} type="button">
+            {advancedOpen ? "Скрыть расширенные настройки" : "Расширенные настройки"}
           </button>
+
+          {advancedOpen ? (
+            <div style={{ marginTop: 14 }}>
+              <CheckboxMultiSelect
+                label="По каким колонкам объединять дисциплину"
+                options={colOptions}
+                value={cfg.merge_rules?.key_cols || []}
+                onChange={(arr) => setMergeRuleArray("key_cols", arr)}
+              />
+
+              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+                <div style={{ width: 260, fontWeight: 700 }}>Откуда брать список групп (приоритет)</div>
+                <select
+                  className="input"
+                  style={{ width: 260 }}
+                  value={cfg.merge_rules?.group_priority_type || "lecture"}
+                  onChange={(e) => setMergeRule("group_priority_type", e.target.value)}
+                >
+                  <option value="lecture">Лекции</option>
+                  <option value="lab_practice">Лаб/практики</option>
+                </select>
+              </div>
+
+              <CheckboxMultiSelect
+                label="Какие колонки суммировать из лекций"
+                options={colOptions}
+                value={cfg.merge_rules?.sum_cols_by_type?.lecture || []}
+                onChange={(arr) => setSumColsByType("lecture", arr)}
+              />
+
+              <CheckboxMultiSelect
+                label="Какие колонки суммировать из лаб/практик"
+                options={colOptions}
+                value={cfg.merge_rules?.sum_cols_by_type?.lab_practice || []}
+                onChange={(arr) => setSumColsByType("lab_practice", arr)}
+              />
+            </div>
+          ) : null}
+
+          <div className="actions-row" style={{ marginTop: 12 }}>
+            <button className="btn btn-primary" onClick={saveSettings} disabled={!excelTemplateId}>
+              СОХРАНИТЬ
+            </button>
+          </div>
         </div>
 
         <div className="hr" style={{ marginTop: 18 }} />
@@ -276,7 +420,7 @@ export default function SettingsPage() {
 
         <Section title="teacher.*" items={grouped.stableTeacher} copyField="example" />
         <Section title="row.*" items={grouped.dynamicRow} copyField="example" />
-        <BlocksSection title="blocks" blocks={blocksData.blocks || []} />
+        <BlocksSection title="blocks.*" blocks={blocksData.blocks || []} />
 
         <div className="actions-row" style={{ marginTop: 16 }}>
           <button className="btn btn-primary" onClick={() => navigate("/docx-upload")}>
@@ -291,8 +435,8 @@ export default function SettingsPage() {
 function SelectRow({ label, value, cols, onChange }) {
   return (
     <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-      <div style={{ width: 220, fontWeight: 700 }}>{label}</div>
-      <select className="input" style={{ width: 720 }} value={value || ""} onChange={(e) => onChange(e.target.value)}>
+      <div style={{ width: 260, fontWeight: 700 }}>{label}</div>
+      <select className="input" style={{ width: 680 }} value={value || ""} onChange={(e) => onChange(e.target.value)}>
         <option value="">—</option>
         {cols.map((c) => (
           <option key={c.column_name} value={c.column_name}>
@@ -300,6 +444,70 @@ function SelectRow({ label, value, cols, onChange }) {
           </option>
         ))}
       </select>
+    </div>
+  );
+}
+
+function TextRow({ label, value, onChange, placeholder }) {
+  return (
+    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+      <div style={{ width: 260, fontWeight: 700 }}>{label}</div>
+      <input className="input" style={{ width: 680 }} value={value || ""} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+    </div>
+  );
+}
+
+function CheckboxMultiSelect({ label, options, value, onChange }) {
+  const set = useMemo(() => new Set(value || []), [value]);
+
+  function toggle(opt) {
+    const next = new Set(set);
+    if (next.has(opt)) next.delete(opt);
+    else next.add(opt);
+    onChange(Array.from(next));
+  }
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontWeight: 700, marginBottom: 8 }}>{label}</div>
+
+      <div
+        className="card"
+        style={{
+          borderRadius: 12,
+          padding: 10,
+          border: "1px solid rgba(15,23,42,.10)",
+          maxHeight: 220,
+          overflow: "auto",
+          background: "#fff",
+        }}
+      >
+        {!options.length ? (
+          <div className="small">Нет колонок</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+            {options.map((opt) => (
+              <label
+                key={opt}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(15,23,42,.08)",
+                  background: set.has(opt) ? "rgba(47,107,255,.08)" : "transparent",
+                  cursor: "pointer",
+                  userSelect: "none",
+                }}
+              >
+                <input type="checkbox" checked={set.has(opt)} onChange={() => toggle(opt)} style={{ transform: "scale(1.05)" }} />
+                <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 13 }}>{opt}</span>
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
