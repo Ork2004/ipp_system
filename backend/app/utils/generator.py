@@ -154,6 +154,7 @@ def generate_docx_for_teacher(
                     semester_map=semester_map,
                     staff_hours_col=staff_hours_col,
                     hourly_hours_col=hourly_hours_col,
+                    settings_cfg=settings,
                 )
 
                 parts = lk.split(".")[1:]

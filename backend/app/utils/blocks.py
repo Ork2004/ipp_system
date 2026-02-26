@@ -1,6 +1,7 @@
 import re
 from typing import Dict, Any, List, Tuple, Optional
 
+
 SEM_RE = re.compile(r"(?:(\d+)\s*(?:сем|semestr|semester))", re.IGNORECASE)
 
 
@@ -26,31 +27,6 @@ def detect_semester_columns(columns: List[Tuple[str, str]]) -> Dict[str, str]:
     for sem_num in sorted(found.keys()):
         out[f"sem{sem_num}"] = found[sem_num]
     return out
-
-
-def build_available_block_keys(semester_map: Dict[str, str], has_hourly: bool) -> List[dict]:
-    blocks = []
-    for sem_key in semester_map.keys():
-        blocks.append({
-            "key": f"blocks.teaching_load.staff.{sem_key}",
-            "title": f"Учебная нагрузка (штатная) — {sem_key}",
-            "type": "loop",
-        })
-        if has_hourly:
-            blocks.append({
-                "key": f"blocks.teaching_load.hourly.{sem_key}",
-                "title": f"Учебная нагрузка (почасовая) — {sem_key}",
-                "type": "loop",
-            })
-    return blocks
-
-
-def build_block_snippet(loop_key: str, loop_var: str = "row") -> str:
-    return (
-        "{%tr for " + loop_var + " in " + loop_key + " %}\n"
-        "  {{ " + loop_var + ".distsiplina }}\n"
-        "{%tr endfor %}"
-    )
 
 
 def match_teacher(value: Any, teacher_full_name: str) -> bool:
@@ -84,6 +60,113 @@ def build_row_object(row_data: dict, col_to_header: dict) -> dict:
         out[col_name] = row_data.get(header_text)
     return out
 
+def _match_activity_type(value: Any, patterns: List[str]) -> bool:
+    if value is None:
+        return False
+    s = str(value).lower()
+    for p in patterns:
+        if p.lower() in s:
+            return True
+    return False
+
+
+def _normalize_str(x: Any) -> str:
+    if x is None:
+        return ""
+    return re.sub(r"\s+", " ", str(x)).strip()
+
+
+def merge_rows_dynamic(
+    rows: List[dict],
+    settings_cfg: dict,
+) -> List[dict]:
+
+    if not rows:
+        return []
+
+    columns_cfg = settings_cfg.get("columns", {})
+    merge_rules = settings_cfg.get("merge_rules", {})
+    activity_types = settings_cfg.get("activity_types", {})
+
+    discipline_col = columns_cfg.get("discipline_col")
+    activity_col = columns_cfg.get("activity_type_col")
+    group_col = columns_cfg.get("group_col")
+
+    key_cols = merge_rules.get("key_cols", [])
+    sum_cols_by_type = merge_rules.get("sum_cols_by_type", {})
+    first_non_empty_cols = merge_rules.get("first_non_empty_cols", [])
+    group_priority_type = merge_rules.get("group_priority_type", "lecture")
+    group_join = merge_rules.get("group_join", ", ")
+
+    lecture_patterns = activity_types.get("lecture", [])
+    lab_patterns = activity_types.get("lab_practice", [])
+
+    grouped: Dict[Tuple, List[dict]] = {}
+
+    for r in rows:
+        key = []
+        for kc in key_cols:
+            key.append(_normalize_str(r.get(kc)))
+        grouped.setdefault(tuple(key), []).append(r)
+
+    merged_rows: List[dict] = []
+
+    for key, group_rows in grouped.items():
+
+        merged: Dict[str, Any] = {}
+
+        lecture_rows = []
+        lab_rows = []
+
+        for r in group_rows:
+            activity_val = r.get(activity_col)
+            if _match_activity_type(activity_val, lecture_patterns):
+                lecture_rows.append(r)
+            elif _match_activity_type(activity_val, lab_patterns):
+                lab_rows.append(r)
+            else:
+                lecture_rows.append(r)
+
+        for idx, kc in enumerate(key_cols):
+            merged[kc] = key[idx]
+
+        if group_col:
+            if lecture_rows and group_priority_type == "lecture":
+                merged[group_col] = lecture_rows[0].get(group_col)
+            else:
+                all_groups = set()
+                for r in group_rows:
+                    g = _normalize_str(r.get(group_col))
+                    if g:
+                        all_groups.add(g)
+                merged[group_col] = group_join.join(sorted(all_groups))
+
+        for col in first_non_empty_cols:
+            val = None
+            for r in group_rows:
+                if not_empty(r.get(col)):
+                    val = r.get(col)
+                    break
+            merged[col] = val
+
+        total_sum = 0.0
+
+        for col in sum_cols_by_type.get("lecture", []):
+            s = sum(to_num(r.get(col)) for r in lecture_rows)
+            merged[col] = s
+            total_sum += s
+
+        for col in sum_cols_by_type.get("lab_practice", []):
+            s = sum(to_num(r.get(col)) for r in lab_rows)
+            merged[col] = s
+            total_sum += s
+
+        if "itogo" in merged:
+            merged["itogo"] = total_sum
+
+        merged_rows.append(merged)
+
+    return merged_rows
 
 def build_block_rows(
     *,
@@ -95,7 +178,9 @@ def build_block_rows(
     semester_map: Dict[str, str],
     staff_hours_col: str,
     hourly_hours_col: Optional[str],
+    settings_cfg: dict,
 ) -> List[dict]:
+
     parts = loop_key.split(".")
     if len(parts) != 4:
         return []
@@ -116,9 +201,10 @@ def build_block_rows(
         ht = col_to_header.get(col_name)
         return None if not ht else row_data.get(ht)
 
-    out: List[dict] = []
+    raw_rows: List[dict] = []
 
     for rd in excel_rows:
+
         if not match_teacher(get_val(rd, teacher_col), teacher_full_name):
             continue
 
@@ -133,6 +219,8 @@ def build_block_rows(
         if load_kind == "hourly" and h_val <= 0:
             continue
 
-        out.append(build_row_object(rd, col_to_header))
+        raw_rows.append(build_row_object(rd, col_to_header))
 
-    return out
+    merged = merge_rows_dynamic(raw_rows, settings_cfg)
+
+    return merged
