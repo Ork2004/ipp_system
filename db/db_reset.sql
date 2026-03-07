@@ -206,6 +206,55 @@ CREATE TABLE generation_history (
     CONSTRAINT ck_gen_hist_status CHECK (status IN ('success','error'))
 );
 
+CREATE TABLE IF NOT EXISTS raw_docx_templates (
+    id SERIAL PRIMARY KEY,
+    department_id INTEGER NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+    academic_year VARCHAR(32) NOT NULL,
+    file_path TEXT NOT NULL,
+    source_filename TEXT,
+    scan_schema JSONB,
+    tables_count INTEGER NOT NULL DEFAULT 0,
+    status VARCHAR(32) NOT NULL DEFAULT 'scanned',
+    error_text TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    UNIQUE (department_id, academic_year)
+);
+
+CREATE TABLE IF NOT EXISTS raw_docx_tables (
+    id SERIAL PRIMARY KEY,
+    template_id INTEGER NOT NULL REFERENCES raw_docx_templates(id) ON DELETE CASCADE,
+    table_index INTEGER NOT NULL,
+    section_title TEXT,
+    table_type VARCHAR(32) NOT NULL DEFAULT 'static', -- static | loop
+    row_count INTEGER NOT NULL DEFAULT 0,
+    col_count INTEGER NOT NULL DEFAULT 0,
+    header_signature TEXT,
+    has_total_row BOOLEAN NOT NULL DEFAULT FALSE,
+    loop_template_row_index INTEGER,
+    column_hints JSONB,
+    editable_cells_count INTEGER NOT NULL DEFAULT 0,
+    prefilled_cells_count INTEGER NOT NULL DEFAULT 0,
+    extra_meta JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    UNIQUE (template_id, table_index)
+);
+
+CREATE TABLE IF NOT EXISTS raw_docx_cells (
+    id SERIAL PRIMARY KEY,
+    table_id INTEGER NOT NULL REFERENCES raw_docx_tables(id) ON DELETE CASCADE,
+    row_index INTEGER NOT NULL,
+    col_index INTEGER NOT NULL,
+    cell_key VARCHAR(128) NOT NULL,
+    original_text TEXT,
+    normalized_text TEXT,
+    is_empty BOOLEAN NOT NULL DEFAULT FALSE,
+    is_editable BOOLEAN NOT NULL DEFAULT FALSE,
+    cell_kind VARCHAR(32) NOT NULL DEFAULT 'text',
+    extra_meta JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    UNIQUE (table_id, row_index, col_index)
+);
+
 CREATE INDEX ix_gen_hist_for_teacher_time
 ON generation_history(generated_for_teacher_id, created_at DESC);
 

@@ -7,6 +7,8 @@ import WorkloadDataPage from "./pages/WorkloadDataPage";
 import DocxUploadPage from "./pages/DocxUploadPage";
 import SettingsPage from "./pages/SettingsPage";
 import GeneratePage from "./pages/GeneratePage";
+import RawTemplateUploadPage from "./pages/RawTemplateUploadPage";
+import ManualTablesPage from "./pages/ManualTablesPage";
 
 function RequireAuth({ children }) {
   const token = localStorage.getItem("token");
@@ -78,6 +80,23 @@ export default function App() {
           }
         />
 
+        <Route
+          path="/raw-template-upload"
+          element={
+            <RequireAdmin>
+              <RawTemplateUploadPage />
+            </RequireAdmin>
+          }
+        />
+
+        <Route
+          path="/manual-tables"
+          element={
+            <RequireAdmin>
+              <ManualTablesPage />
+            </RequireAdmin>
+          }
+        />
         <Route path="*" element={<Navigate to="/generate" replace />} />
       </Routes>
     </BrowserRouter>
