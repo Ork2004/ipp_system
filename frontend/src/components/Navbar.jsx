@@ -37,6 +37,12 @@ export default function Navbar() {
                   <NavLink to="/workload-data" className={linkClass}>
                     Данные
                   </NavLink>
+                  <NavLink to="/raw-template-upload" className={linkClass}>
+                    Raw шаблон
+                  </NavLink>
+                  <NavLink to="/manual-tables" className={linkClass}>
+                    Таблицы
+                  </NavLink>
                   <NavLink to="/settings" className={linkClass}>
                     Настройка
                   </NavLink>

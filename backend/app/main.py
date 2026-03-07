@@ -10,7 +10,7 @@ from backend.app.api.auth_api import router as auth_router
 from backend.app.api.teachers_api import router as teachers_router
 from backend.app.api.history_api import router as history_router
 from backend.app.api.blocks_api import router as blocks_router
-
+from backend.app.api.raw_template_api import router as raw_template_router
 app = FastAPI(title="IPP System API")
 
 app.add_middleware(
@@ -35,3 +35,4 @@ app.include_router(docx_router)
 app.include_router(settings_router)
 app.include_router(blocks_router)
 app.include_router(generate_router)
+app.include_router(raw_template_router)

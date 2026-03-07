@@ -256,3 +256,14 @@ button, input, select, textarea{
   *{ transition: none !important; transform: none !important; }
 }
 
+.btn-danger{
+  background: #dc2626;
+  color: #fff;
+  box-shadow: 0 10px 18px rgba(220,38,38,.18);
+}
+
+.btn-danger:hover{
+  background: #b91c1c;
+  transform: translateY(-1px);
+  box-shadow: 0 14px 22px rgba(220,38,38,.22);
+}
