@@ -255,6 +255,38 @@ CREATE TABLE IF NOT EXISTS raw_docx_cells (
     UNIQUE (table_id, row_index, col_index)
 );
 
+CREATE TABLE IF NOT EXISTS teacher_manual_cell_values (
+    id SERIAL PRIMARY KEY,
+    teacher_id INTEGER NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+    raw_template_id INTEGER NOT NULL REFERENCES raw_docx_templates(id) ON DELETE CASCADE,
+    raw_table_id INTEGER NOT NULL REFERENCES raw_docx_tables(id) ON DELETE CASCADE,
+    raw_cell_id INTEGER NOT NULL REFERENCES raw_docx_cells(id) ON DELETE CASCADE,
+    value_text TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now(),
+    UNIQUE (teacher_id, raw_cell_id)
+);
+
+CREATE TABLE IF NOT EXISTS teacher_manual_loop_rows (
+    id SERIAL PRIMARY KEY,
+    teacher_id INTEGER NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+    raw_template_id INTEGER NOT NULL REFERENCES raw_docx_templates(id) ON DELETE CASCADE,
+    raw_table_id INTEGER NOT NULL REFERENCES raw_docx_tables(id) ON DELETE CASCADE,
+    row_order INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS teacher_manual_loop_cell_values (
+    id SERIAL PRIMARY KEY,
+    loop_row_id INTEGER NOT NULL REFERENCES teacher_manual_loop_rows(id) ON DELETE CASCADE,
+    col_index INTEGER NOT NULL,
+    value_text TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT now(),
+    updated_at TIMESTAMP NOT NULL DEFAULT now(),
+    UNIQUE (loop_row_id, col_index)
+);
+
 CREATE INDEX ix_gen_hist_for_teacher_time
 ON generation_history(generated_for_teacher_id, created_at DESC);
 
