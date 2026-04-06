@@ -97,6 +97,15 @@ export default function App() {
             </RequireAdmin>
           }
         />
+
+        <Route
+          path="/manual-tables"
+          element={
+            <RequireAdmin>
+              <ManualTablesPage />
+            </RequireAdmin>
+          }
+        />
         <Route path="*" element={<Navigate to="/generate" replace />} />
       </Routes>
     </BrowserRouter>
