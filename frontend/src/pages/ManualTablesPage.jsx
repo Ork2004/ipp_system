@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 
 export default function ManualTablesPage() {
+  const role = useMemo(() => localStorage.getItem("role") || "guest", []);
   const [departmentId] = useState(
     Number(localStorage.getItem("department_id") || 0)
   );
@@ -12,10 +13,19 @@ export default function ManualTablesPage() {
     Number(localStorage.getItem("raw_template_id") || 0)
   );
 
+  const [teachers, setTeachers] = useState([]);
+  const [teacherId, setTeacherId] = useState(
+    Number(localStorage.getItem("teacher_id") || 0)
+  );
+
   const [tables, setTables] = useState([]);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [savingTypeId, setSavingTypeId] = useState(0);
+  const [savingStatic, setSavingStatic] = useState(false);
+  const [addingLoopForTableId, setAddingLoopForTableId] = useState(0);
+  const [savingLoopRowId, setSavingLoopRowId] = useState(0);
+  const [deletingLoopRowId, setDeletingLoopRowId] = useState(0);
   const [openTableIds, setOpenTableIds] = useState({});
 
   const groupedSections = useMemo(() => {
@@ -32,6 +42,25 @@ export default function ManualTablesPage() {
       items,
     }));
   }, [tables]);
+
+  async function loadTeachers() {
+    if (role !== "admin" || !departmentId) return;
+    try {
+      const res = await api.get("/teachers", {
+        params: { department_id: departmentId },
+      });
+      const list = Array.isArray(res.data) ? res.data : [];
+      setTeachers(list);
+
+      if (!teacherId && list.length) {
+        const first = Number(list[0].id);
+        setTeacherId(first);
+        localStorage.setItem("teacher_id", String(first));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
 
   async function resolveRawTemplateIdByYear(year) {
     if (!departmentId || !year) return 0;
@@ -51,21 +80,50 @@ export default function ManualTablesPage() {
     return id;
   }
 
-  async function loadTables(templateId) {
+  async function loadForm(templateId, currentTeacherId) {
     if (!templateId) {
       setTables([]);
       setStatus("Нет raw_template_id");
       return;
     }
+    if (!currentTeacherId) {
+      setTables([]);
+      setStatus("Выбери преподавателя");
+      return;
+    }
 
     setLoading(true);
     try {
-      const res = await api.get(`/raw-template/${templateId}/tables`);
+      const res = await api.get("/manual-fill/form", {
+        params: {
+          raw_template_id: templateId,
+          teacher_id: currentTeacherId,
+        },
+      });
+
       const list = Array.isArray(res.data?.tables) ? res.data.tables : [];
-      setTables(list);
+
+      const normalized = list.map((table) => ({
+        ...table,
+        matrix: (table.matrix || []).map((row) =>
+          row.map((cell) => ({
+            ...cell,
+            local_value:
+              cell.saved_value !== undefined && cell.saved_value !== null
+                ? String(cell.saved_value)
+                : "",
+          }))
+        ),
+        loop_rows: (table.loop_rows || []).map((row) => ({
+          ...row,
+          values_map: buildLoopValuesMap(row.values || [], table.col_count || 0),
+        })),
+      }));
+
+      setTables(normalized);
 
       const opened = {};
-      list.forEach((t, idx) => {
+      normalized.forEach((t, idx) => {
         opened[t.id] = idx < 3;
       });
       setOpenTableIds(opened);
@@ -73,7 +131,7 @@ export default function ManualTablesPage() {
       setStatus("");
     } catch (e) {
       console.error(e);
-      setStatus(e?.response?.data?.detail || "Ошибка загрузки таблиц");
+      setStatus(e?.response?.data?.detail || "Ошибка загрузки формы");
       setTables([]);
     } finally {
       setLoading(false);
@@ -95,8 +153,19 @@ export default function ManualTablesPage() {
         return;
       }
 
+      const currentTeacherId =
+        role === "teacher"
+          ? Number(localStorage.getItem("teacher_id") || 0)
+          : teacherId;
+
+      if (!currentTeacherId) {
+        setStatus("Выбери преподавателя");
+        setTables([]);
+        return;
+      }
+
       setRawTemplateId(id);
-      await loadTables(id);
+      await loadForm(id, currentTeacherId);
     } catch (e) {
       console.error(e);
       setStatus(e?.response?.data?.detail || "Ошибка загрузки");
@@ -105,11 +174,21 @@ export default function ManualTablesPage() {
   }
 
   useEffect(() => {
+    loadTeachers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (role === "teacher") {
+      const myTeacherId = Number(localStorage.getItem("teacher_id") || 0);
+      if (myTeacherId) setTeacherId(myTeacherId);
+    }
     reloadCurrent();
 
     const refresh = () => {
       setAcademicYear(localStorage.getItem("academic_year") || "2025-2026");
       setRawTemplateId(Number(localStorage.getItem("raw_template_id") || 0));
+      setTeacherId(Number(localStorage.getItem("teacher_id") || 0) || 0);
       reloadCurrent();
     };
 
@@ -122,7 +201,14 @@ export default function ManualTablesPage() {
       document.removeEventListener("visibilitychange", onVis);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [role]);
+
+  useEffect(() => {
+    if (role === "admin" && teacherId && rawTemplateId) {
+      loadForm(rawTemplateId, teacherId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teacherId]);
 
   async function handleChangeYear(nextYear) {
     setAcademicYear(nextYear);
@@ -138,7 +224,19 @@ export default function ManualTablesPage() {
         setStatus("Raw шаблон для этого года не найден");
         return;
       }
-      await loadTables(id);
+
+      const currentTeacherId =
+        role === "teacher"
+          ? Number(localStorage.getItem("teacher_id") || 0)
+          : teacherId;
+
+      if (!currentTeacherId) {
+        setTables([]);
+        setStatus("Выбери преподавателя");
+        return;
+      }
+
+      await loadForm(id, currentTeacherId);
     } catch (e) {
       console.error(e);
       setStatus(e?.response?.data?.detail || "Ошибка переключения года");
@@ -176,6 +274,183 @@ export default function ManualTablesPage() {
     }));
   }
 
+  function updateStaticCell(rawTableId, rawCellId, value) {
+    setTables((prev) =>
+      prev.map((table) => {
+        if (table.id !== rawTableId) return table;
+
+        return {
+          ...table,
+          matrix: (table.matrix || []).map((row) =>
+            row.map((cell) =>
+              cell.raw_cell_id === rawCellId
+                ? { ...cell, local_value: value }
+                : cell
+            )
+          ),
+        };
+      })
+    );
+  }
+
+  async function saveStaticValues() {
+    if (!rawTemplateId) {
+      setStatus("Нет raw шаблона");
+      return;
+    }
+    if (!teacherId) {
+      setStatus("Нет teacher_id");
+      return;
+    }
+
+    try {
+      setSavingStatic(true);
+      setStatus("Сохранение обычных таблиц...");
+
+      const values = [];
+
+      for (const table of tables) {
+        if (table.table_type !== "static") continue;
+
+        for (const row of table.matrix || []) {
+          for (const cell of row) {
+            if (!cell.editable) continue;
+            values.push({
+              raw_cell_id: cell.raw_cell_id,
+              value: cell.local_value || "",
+            });
+          }
+        }
+      }
+
+      await api.post("/manual-fill/save-static", {
+        raw_template_id: rawTemplateId,
+        teacher_id: teacherId,
+        values,
+      });
+
+      setStatus("Обычные таблицы сохранены ✅");
+      await loadForm(rawTemplateId, teacherId);
+    } catch (e) {
+      console.error(e);
+      setStatus(e?.response?.data?.detail || "Ошибка сохранения static");
+    } finally {
+      setSavingStatic(false);
+    }
+  }
+
+  async function addLoopRow(rawTableId) {
+    if (!rawTemplateId || !teacherId) {
+      setStatus("Нет raw_template_id или teacher_id");
+      return;
+    }
+
+    try {
+      setAddingLoopForTableId(rawTableId);
+      setStatus("Добавление строки...");
+
+      await api.post("/manual-fill/add-loop-row", {
+        raw_template_id: rawTemplateId,
+        raw_table_id: rawTableId,
+        teacher_id: teacherId,
+      });
+
+      setStatus("Строка добавлена ✅");
+      await loadForm(rawTemplateId, teacherId);
+      setOpenTableIds((prev) => ({ ...prev, [rawTableId]: true }));
+    } catch (e) {
+      console.error(e);
+      setStatus(e?.response?.data?.detail || "Ошибка добавления строки");
+    } finally {
+      setAddingLoopForTableId(0);
+    }
+  }
+
+  function updateLoopCell(rawTableId, loopRowId, colIndex, value) {
+    setTables((prev) =>
+      prev.map((table) => {
+        if (table.id !== rawTableId) return table;
+
+        return {
+          ...table,
+          loop_rows: (table.loop_rows || []).map((row) => {
+            if (row.loop_row_id !== loopRowId) return row;
+            return {
+              ...row,
+              values_map: {
+                ...(row.values_map || {}),
+                [colIndex]: value,
+              },
+            };
+          }),
+        };
+      })
+    );
+  }
+
+  async function saveLoopRow(rawTableId, loopRowId) {
+    const table = tables.find((t) => t.id === rawTableId);
+    const row = (table?.loop_rows || []).find((r) => r.loop_row_id === loopRowId);
+
+    if (!row) {
+      setStatus("Loop строка не найдена");
+      return;
+    }
+
+    try {
+      setSavingLoopRowId(loopRowId);
+      setStatus("Сохранение строки...");
+
+      const values = [];
+      const colCount = Number(table?.col_count || 0);
+
+      for (let col = 0; col < colCount; col += 1) {
+        values.push({
+          col_index: col,
+          value: row.values_map?.[col] || "",
+        });
+      }
+
+      await api.post("/manual-fill/save-loop-row", {
+        teacher_id: teacherId,
+        loop_row_id: loopRowId,
+        values,
+      });
+
+      setStatus("Loop строка сохранена ✅");
+      await loadForm(rawTemplateId, teacherId);
+      setOpenTableIds((prev) => ({ ...prev, [rawTableId]: true }));
+    } catch (e) {
+      console.error(e);
+      setStatus(e?.response?.data?.detail || "Ошибка сохранения строки");
+    } finally {
+      setSavingLoopRowId(0);
+    }
+  }
+
+  async function deleteLoopRow(loopRowId, rawTableId) {
+    const ok = window.confirm("Удалить эту строку?");
+    if (!ok) return;
+
+    try {
+      setDeletingLoopRowId(loopRowId);
+      setStatus("Удаление строки...");
+
+      await api.delete(`/manual-fill/loop-row/${loopRowId}`, {
+        params: { teacher_id: teacherId },
+      });
+
+      setStatus("Строка удалена ✅");
+      await loadForm(rawTemplateId, teacherId);
+      setOpenTableIds((prev) => ({ ...prev, [rawTableId]: true }));
+    } catch (e) {
+      console.error(e);
+      setStatus(e?.response?.data?.detail || "Ошибка удаления строки");
+    } finally {
+      setDeletingLoopRowId(0);
+    }
+  }
+
   return (
     <div className="container">
       <div className="page-title">Заполнение таблиц шаблона</div>
@@ -198,12 +473,45 @@ export default function ManualTablesPage() {
             placeholder="2025-2026"
           />
 
+          {role === "admin" ? (
+            <select
+              className="input"
+              style={{ width: 420 }}
+              value={teacherId ? String(teacherId) : ""}
+              onChange={(e) => {
+                const v = Number(e.target.value || 0);
+                setTeacherId(v);
+                localStorage.setItem("teacher_id", String(v));
+              }}
+            >
+              {!teachers.length ? (
+                <option value="">Нет преподавателей</option>
+              ) : (
+                teachers.map((t) => (
+                  <option key={t.id} value={String(t.id)}>
+                    {t.full_name}
+                  </option>
+                ))
+              )}
+            </select>
+          ) : null}
+
           <div className="small">
             raw_template_id: {rawTemplateId || "—"} | department_id:{" "}
             {departmentId || "—"}
           </div>
 
           <div className="small">{loading ? "Загрузка..." : status}</div>
+        </div>
+
+        <div className="actions-row" style={{ marginBottom: 14 }}>
+          <button
+            className="btn btn-primary"
+            onClick={saveStaticValues}
+            disabled={savingStatic || !tables.some((t) => t.table_type === "static")}
+          >
+            {savingStatic ? "Сохранение..." : "СОХРАНИТЬ ОБЫЧНЫЕ ТАБЛИЦЫ"}
+          </button>
         </div>
 
         <div className="hr" />
@@ -247,9 +555,7 @@ export default function ManualTablesPage() {
                       Таблица #{table.table_index + 1}
                     </div>
                     <div className="small">
-                      {table.row_count} строк • {table.col_count} колонок •
-                      editable: {table.editable_cells_count} • filled:{" "}
-                      {table.prefilled_cells_count}
+                      {table.row_count} строк • {table.col_count} колонок
                     </div>
                     <div className="small">
                       {table.has_total_row ? "Есть строка Итого" : "Без строки Итого"}
@@ -303,45 +609,28 @@ export default function ManualTablesPage() {
                         <b>Тип:</b> {table.table_type || "static"}
                       </div>
                       <div className="small">
-                        <b>Header signature:</b>{" "}
-                        <span
-                          style={{
-                            fontFamily:
-                              "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                          }}
-                        >
-                          {table.header_signature || "—"}
-                        </span>
-                      </div>
-                      <div className="small">
                         <b>Подсказки колонок:</b>{" "}
                         {(table.column_hints || []).join(" | ") || "—"}
                       </div>
                     </div>
 
-                    <RawTableGrid table={table} />
-
-                    {table.table_type === "loop" ? (
-                      <div
-                        style={{
-                          marginTop: 12,
-                          padding: 12,
-                          borderRadius: 12,
-                          background: "rgba(47,107,255,.06)",
-                          border: "1px solid rgba(47,107,255,.12)",
-                        }}
-                      >
-                        <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                          Loop-таблица
-                        </div>
-                        <div className="small">
-                          Сейчас эта страница уже умеет:
-                          определять и менять тип таблицы.
-                          Сохранение пользовательских значений и добавление новых
-                          строк мы сделаем следующим backend/API шагом.
-                        </div>
-                      </div>
-                    ) : null}
+                    {table.table_type === "static" ? (
+                      <StaticTableGrid
+                        table={table}
+                        onChange={updateStaticCell}
+                      />
+                    ) : (
+                      <LoopTableEditor
+                        table={table}
+                        addingLoopForTableId={addingLoopForTableId}
+                        savingLoopRowId={savingLoopRowId}
+                        deletingLoopRowId={deletingLoopRowId}
+                        onAddRow={addLoopRow}
+                        onChangeCell={updateLoopCell}
+                        onSaveRow={saveLoopRow}
+                        onDeleteRow={deleteLoopRow}
+                      />
+                    )}
                   </div>
                 ) : null}
               </div>
@@ -353,7 +642,7 @@ export default function ManualTablesPage() {
   );
 }
 
-function RawTableGrid({ table }) {
+function StaticTableGrid({ table, onChange }) {
   const matrix = Array.isArray(table.matrix) ? table.matrix : [];
 
   return (
@@ -386,12 +675,16 @@ function RawTableGrid({ table }) {
                     }}
                   >
                     {cell.editable ? (
-                      <input
+                      <textarea
                         className="input"
-                        value=""
-                        readOnly
-                        placeholder="пустая ячейка"
+                        value={cell.local_value || ""}
+                        onChange={(e) =>
+                          onChange(table.id, cell.raw_cell_id, e.target.value)
+                        }
+                        placeholder="Введите значение"
+                        rows={3}
                         style={{
+                          resize: "vertical",
                           background: "#fff",
                           borderColor: "rgba(34,197,94,.30)",
                         }}
@@ -422,4 +715,143 @@ function RawTableGrid({ table }) {
       </table>
     </div>
   );
+}
+
+function LoopTableEditor({
+  table,
+  addingLoopForTableId,
+  savingLoopRowId,
+  deletingLoopRowId,
+  onAddRow,
+  onChangeCell,
+  onSaveRow,
+  onDeleteRow,
+}) {
+  const rows = Array.isArray(table.loop_rows) ? table.loop_rows : [];
+  const colCount = Number(table.col_count || 0);
+  const headers =
+    Array.isArray(table.column_hints) && table.column_hints.length
+      ? table.column_hints
+      : Array.from({ length: colCount }, (_, i) => `Колонка ${i + 1}`);
+
+  return (
+    <div>
+      <div className="actions-row" style={{ marginBottom: 12 }}>
+        <button
+          className="btn btn-primary"
+          onClick={() => onAddRow(table.id)}
+          disabled={addingLoopForTableId === table.id}
+        >
+          {addingLoopForTableId === table.id ? "Добавление..." : "ДОБАВИТЬ СТРОКУ"}
+        </button>
+      </div>
+
+      {!rows.length ? (
+        <div className="small">Пока нет добавленных строк</div>
+      ) : null}
+
+      {rows.map((row) => (
+        <div
+          key={row.loop_row_id}
+          className="card"
+          style={{
+            marginTop: 10,
+            borderRadius: 12,
+            border: "1px solid rgba(15,23,42,.10)",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              padding: 12,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+              background: "#fcfdff",
+              borderBottom: "1px solid rgba(15,23,42,.08)",
+            }}
+          >
+            <div style={{ fontWeight: 700 }}>Строка #{row.row_order}</div>
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                className="btn btn-outline"
+                onClick={() => onSaveRow(table.id, row.loop_row_id)}
+                disabled={savingLoopRowId === row.loop_row_id}
+              >
+                {savingLoopRowId === row.loop_row_id
+                  ? "Сохранение..."
+                  : "Сохранить строку"}
+              </button>
+
+              <button
+                className="btn btn-danger"
+                onClick={() => onDeleteRow(row.loop_row_id, table.id)}
+                disabled={deletingLoopRowId === row.loop_row_id}
+              >
+                {deletingLoopRowId === row.loop_row_id
+                  ? "Удаление..."
+                  : "Удалить"}
+              </button>
+            </div>
+          </div>
+
+          <div style={{ padding: 12, overflowX: "auto" }}>
+            <table
+              className="table"
+              style={{
+                minWidth: Math.max(760, colCount * 180),
+                tableLayout: "fixed",
+              }}
+            >
+              <thead>
+                <tr>
+                  {headers.map((h, idx) => (
+                    <th key={`${row.loop_row_id}-h-${idx}`}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  {Array.from({ length: colCount }, (_, colIndex) => (
+                    <td key={`${row.loop_row_id}-c-${colIndex}`}>
+                      <textarea
+                        className="input"
+                        rows={3}
+                        value={row.values_map?.[colIndex] || ""}
+                        onChange={(e) =>
+                          onChangeCell(
+                            table.id,
+                            row.loop_row_id,
+                            colIndex,
+                            e.target.value
+                          )
+                        }
+                        placeholder="Введите значение"
+                        style={{ resize: "vertical" }}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function buildLoopValuesMap(values, colCount) {
+  const map = {};
+  for (let i = 0; i < colCount; i += 1) {
+    map[i] = "";
+  }
+  for (const item of values) {
+    map[item.col_index] =
+      item.value !== undefined && item.value !== null ? String(item.value) : "";
+  }
+  return map;
 }
