@@ -43,9 +43,6 @@ export default function Navbar() {
                   <NavLink to="/manual-tables" className={linkClass}>
                     Таблицы
                   </NavLink>
-                  <NavLink to="/manual-tables" className={linkClass}>
-                    Таблицы
-                  </NavLink>
                   <NavLink to="/settings" className={linkClass}>
                     Настройка
                   </NavLink>
