@@ -6,8 +6,6 @@ export default function Navbar() {
   const token = localStorage.getItem("token");
   const role = localStorage.getItem("role") || "guest";
 
-  const linkClass = ({ isActive }) => (isActive ? "active" : "");
-
   function logout() {
     localStorage.removeItem("token");
     localStorage.removeItem("role");
@@ -19,45 +17,140 @@ export default function Navbar() {
     navigate("/login");
   }
 
+  const navItemStyle = ({ isActive }) => ({
+    textDecoration: "none",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: 46,
+    padding: "0 18px",
+    borderRadius: 14,
+    fontSize: 14,
+    fontWeight: 800,
+    letterSpacing: "0.01em",
+    color: "#ffffff",
+    background: isActive ? "rgba(255,255,255,0.20)" : "transparent",
+    border: isActive
+      ? "1px solid rgba(255,255,255,0.24)"
+      : "1px solid transparent",
+    boxShadow: isActive ? "inset 0 1px 0 rgba(255,255,255,0.10)" : "none",
+    transition: "all 0.18s ease",
+    whiteSpace: "nowrap",
+  });
+
   return (
     <div className="navbar">
-      <div className="navbar-inner">
-        <div className="navlinks">
+      <div
+        className="navbar-inner"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 16,
+        }}
+      >
+        <div
+          className="navlinks"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
           {!token ? (
-            <NavLink to="/login" className={linkClass}>
+            <NavLink to="/login" style={navItemStyle}>
               Вход
             </NavLink>
           ) : (
             <>
               {role === "admin" ? (
                 <>
-                  <NavLink to="/excel-upload" className={linkClass}>
+                  <NavLink to="/excel-upload" style={navItemStyle}>
                     Нагрузка
                   </NavLink>
-                  <NavLink to="/workload-data" className={linkClass}>
+
+                  <NavLink to="/workload-data" style={navItemStyle}>
                     Данные
                   </NavLink>
-                  <NavLink to="/settings" className={linkClass}>
+
+                  <NavLink to="/settings" style={navItemStyle}>
                     Настройка
                   </NavLink>
-                  <NavLink to="/docx-upload" className={linkClass}>
+
+                  <NavLink to="/docx-upload" style={navItemStyle}>
                     ИПП
                   </NavLink>
                 </>
               ) : null}
 
-              <NavLink to="/generate" className={linkClass}>
+              <NavLink to="/generate" style={navItemStyle}>
                 Генерация
               </NavLink>
             </>
           )}
         </div>
 
-        <div className="nav-right">
+        <div
+          className="nav-right"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexShrink: 0,
+          }}
+        >
           {token ? (
             <>
-              <div className="pill">{role}</div>
-              <button className="btn btn-outline" onClick={logout}>
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  height: 46,
+                  padding: "0 18px",
+                  borderRadius: 14,
+                  background: "rgba(255,255,255,0.14)",
+                  border: "1px solid rgba(255,255,255,0.22)",
+                  color: "#ffffff",
+                  fontSize: 14,
+                  fontWeight: 800,
+                  letterSpacing: "0.04em",
+                  textTransform: "uppercase",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    background: "#8CF3C9",
+                    boxShadow: "0 0 8px rgba(140,243,201,0.9)",
+                    flexShrink: 0,
+                  }}
+                />
+                {role}
+              </div>
+
+              <button
+                className="btn btn-outline"
+                onClick={logout}
+                style={{
+                  height: 46,
+                  padding: "0 18px",
+                  borderRadius: 14,
+                  border: "1px solid rgba(255,255,255,0.22)",
+                  background: "rgba(255,255,255,0.14)",
+                  color: "#ffffff",
+                  fontSize: 14,
+                  fontWeight: 800,
+                  letterSpacing: "0.01em",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 Выйти
               </button>
             </>
