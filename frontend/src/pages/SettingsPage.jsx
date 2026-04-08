@@ -9,9 +9,13 @@ function copyToClipboard(text) {
 export default function SettingsPage() {
   const navigate = useNavigate();
 
-  const [departmentId, setDepartmentId] = useState(Number(localStorage.getItem("department_id") || 0));
+  const [departmentId, setDepartmentId] = useState(
+    Number(localStorage.getItem("department_id") || 0)
+  );
   const [excelTemplates, setExcelTemplates] = useState([]);
-  const [academicYear, setAcademicYear] = useState(localStorage.getItem("academic_year") || "2025-2026");
+  const [academicYear, setAcademicYear] = useState(
+    localStorage.getItem("academic_year") || "2025-2026"
+  );
   const [excelTemplateId, setExcelTemplateId] = useState("");
 
   const [cols, setCols] = useState([]);
@@ -48,23 +52,38 @@ export default function SettingsPage() {
   const [phData, setPhData] = useState({ stable: [], dynamic: [] });
   const [phStatus, setPhStatus] = useState("");
 
-  const [blocksData, setBlocksData] = useState({ blocks: [], semester_map: {} });
+  const [blocksData, setBlocksData] = useState({
+    blocks: [],
+    semester_map: {},
+  });
   const [blocksStatus, setBlocksStatus] = useState("");
 
   const years = useMemo(() => {
-    const set = new Set((excelTemplates || []).map((t) => t.academic_year).filter(Boolean));
+    const set = new Set(
+      (excelTemplates || []).map((t) => t.academic_year).filter(Boolean)
+    );
     set.add(academicYear);
     return Array.from(set).sort().reverse();
   }, [excelTemplates, academicYear]);
 
   const excelForYear = useMemo(() => {
-    return (excelTemplates || []).find((t) => String(t.academic_year) === String(academicYear)) || null;
+    return (
+      (excelTemplates || []).find(
+        (t) => String(t.academic_year) === String(academicYear)
+      ) || null
+    );
   }, [excelTemplates, academicYear]);
 
-  const colOptions = useMemo(() => (cols || []).map((c) => c.column_name), [cols]);
+  const colOptions = useMemo(
+    () => (cols || []).map((c) => c.column_name),
+    [cols]
+  );
 
   function setCol(key, value) {
-    setCfg((prev) => ({ ...prev, columns: { ...prev.columns, [key]: value } }));
+    setCfg((prev) => ({
+      ...prev,
+      columns: { ...prev.columns, [key]: value },
+    }));
   }
 
   function setActivityPatterns(typeKey, text) {
@@ -83,11 +102,17 @@ export default function SettingsPage() {
   }
 
   function setMergeRule(key, value) {
-    setCfg((prev) => ({ ...prev, merge_rules: { ...(prev.merge_rules || {}), [key]: value } }));
+    setCfg((prev) => ({
+      ...prev,
+      merge_rules: { ...(prev.merge_rules || {}), [key]: value },
+    }));
   }
 
   function setMergeRuleArray(key, arr) {
-    setCfg((prev) => ({ ...prev, merge_rules: { ...(prev.merge_rules || {}), [key]: arr } }));
+    setCfg((prev) => ({
+      ...prev,
+      merge_rules: { ...(prev.merge_rules || {}), [key]: arr },
+    }));
   }
 
   function setSumColsByType(typeKey, arr) {
@@ -109,7 +134,9 @@ export default function SettingsPage() {
       return;
     }
     try {
-      const res = await api.get("/excel/templates", { params: { department_id: depId } });
+      const res = await api.get("/excel/templates", {
+        params: { department_id: depId },
+      });
       setExcelTemplates(res.data || []);
     } catch (e) {
       console.error(e);
@@ -131,7 +158,9 @@ export default function SettingsPage() {
   async function loadCurrentSettingsByYear(depId, year) {
     if (!depId || !year) return;
     try {
-      const res = await api.get("/settings/current", { params: { department_id: depId, academic_year: year } });
+      const res = await api.get("/settings/current", {
+        params: { department_id: depId, academic_year: year },
+      });
 
       if (res.data?.exists) {
         const loaded = res.data.config || {};
@@ -152,16 +181,26 @@ export default function SettingsPage() {
             op_col: c.op_col || "",
           },
           activity_types: {
-            lecture: Array.isArray(at.lecture) ? at.lecture : ["лек", "лк", "lecture"],
-            lab_practice: Array.isArray(at.lab_practice) ? at.lab_practice : ["лаб", "пра", "lab", "pract"],
+            lecture: Array.isArray(at.lecture)
+              ? at.lecture
+              : ["лек", "лк", "lecture"],
+            lab_practice: Array.isArray(at.lab_practice)
+              ? at.lab_practice
+              : ["лаб", "пра", "lab", "pract"],
           },
           merge_rules: {
-            key_cols: Array.isArray(mr.key_cols) ? mr.key_cols : ["distsiplina", "op"],
+            key_cols: Array.isArray(mr.key_cols)
+              ? mr.key_cols
+              : ["distsiplina", "op"],
             group_join: mr.group_join || ", ",
             group_priority_type: mr.group_priority_type || "lecture",
             sum_cols_by_type: {
-              lecture: Array.isArray(sct.lecture) ? sct.lecture : ["l", "srsp", "ekzameny"],
-              lab_practice: Array.isArray(sct.lab_practice) ? sct.lab_practice : ["spz", "lz", "rk_1_2"],
+              lecture: Array.isArray(sct.lecture)
+                ? sct.lecture
+                : ["l", "srsp", "ekzameny"],
+              lab_practice: Array.isArray(sct.lab_practice)
+                ? sct.lab_practice
+                : ["spz", "lz", "rk_1_2"],
             },
           },
         });
@@ -177,7 +216,9 @@ export default function SettingsPage() {
       return;
     }
     try {
-      const res = await api.get("/placeholders", { params: { excel_template_id: exId } });
+      const res = await api.get("/placeholders", {
+        params: { excel_template_id: exId },
+      });
       setPhData(res.data || { stable: [], dynamic: [] });
       setPhStatus("");
     } catch (e) {
@@ -192,7 +233,9 @@ export default function SettingsPage() {
       return;
     }
     try {
-      const res = await api.get("/blocks/available", { params: { excel_template_id: exId } });
+      const res = await api.get("/blocks/available", {
+        params: { excel_template_id: exId },
+      });
       setBlocksData(res.data || { blocks: [], semester_map: {} });
       setBlocksStatus("");
     } catch (e) {
@@ -202,20 +245,29 @@ export default function SettingsPage() {
   }
 
   async function saveSettings() {
-    if (!departmentId) return setSettingsStatus("Нет department_id. Выйди и зайди заново.");
+    if (!departmentId)
+      return setSettingsStatus("Нет department_id. Выйди и зайди заново.");
     if (!academicYear) return setSettingsStatus("Укажи год");
-    if (!excelTemplateId) return setSettingsStatus("Нет Excel для этого года");
+    if (!excelTemplateId)
+      return setSettingsStatus("Нет Excel для этого года");
 
     const c = cfg.columns || {};
-    if (!c.teacher_col || !c.staff_hours_col) return setSettingsStatus("Обязательные: ФИО преподавателя и Штатные часы");
+    if (!c.teacher_col || !c.staff_hours_col)
+      return setSettingsStatus(
+        "Обязательные: ФИО преподавателя и Штатные часы"
+      );
     if (!c.discipline_col || !c.activity_type_col || !c.group_col) {
-      return setSettingsStatus("Обязательные: Дисциплина, Вид занятий, Группа");
+      return setSettingsStatus(
+        "Обязательные: Дисциплина, Вид занятий, Группа"
+      );
     }
 
     const mr = cfg.merge_rules || {};
     const sct = mr.sum_cols_by_type || {};
     if (!Array.isArray(mr.key_cols) || !mr.key_cols.length) {
-      return setSettingsStatus("Расширенные: не задано “по каким колонкам объединять дисциплину”");
+      return setSettingsStatus(
+        "Расширенные: не задано “по каким колонкам объединять дисциплину”"
+      );
     }
 
     const lectureArr = Array.isArray(sct.lecture) ? sct.lecture : [];
@@ -240,7 +292,9 @@ export default function SettingsPage() {
   }
 
   const grouped = useMemo(() => {
-    const stableTeacher = (phData.stable || []).filter((i) => i.category === "teacher");
+    const stableTeacher = (phData.stable || []).filter(
+      (i) => i.category === "teacher"
+    );
     const dynamicRow = phData.dynamic || [];
     return { stableTeacher, dynamicRow };
   }, [phData]);
@@ -258,7 +312,8 @@ export default function SettingsPage() {
     refreshAll();
 
     window.addEventListener("focus", refreshAll);
-    const onVis = () => document.visibilityState === "visible" && refreshAll();
+    const onVis = () =>
+      document.visibilityState === "visible" && refreshAll();
     document.addEventListener("visibilitychange", onVis);
 
     return () => {
@@ -291,14 +346,57 @@ export default function SettingsPage() {
   }, [academicYear, excelTemplates]);
 
   return (
-    <div className="container">
-      <div className="page-title">Настройка генерации</div>
+    <div
+      className="container"
+      style={{
+        maxWidth: 1280,
+        paddingTop: 28,
+        paddingBottom: 40,
+      }}
+    >
+      <div
+        className="page-title"
+        style={{
+          fontSize: 52,
+          fontWeight: 800,
+          lineHeight: 1.05,
+          letterSpacing: "-0.03em",
+          marginBottom: 24,
+          color: "#17356f",
+        }}
+      >
+        Настройка генерации
+      </div>
 
-      <div className="card card-pad">
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
+      <div
+        className="card card-pad"
+        style={{
+          borderRadius: 28,
+          padding: 24,
+          background: "rgba(255,255,255,0.94)",
+          border: "1px solid rgba(30,58,138,0.08)",
+          boxShadow: "0 16px 50px rgba(15, 23, 42, 0.08)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            gap: 14,
+            flexWrap: "wrap",
+            alignItems: "center",
+            marginBottom: 12,
+          }}
+        >
           <select
             className="input"
-            style={{ width: 200 }}
+            style={{
+              width: 220,
+              height: 48,
+              borderRadius: 14,
+              border: "1px solid #d9e3f5",
+              background: "#f8fbff",
+              boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
+            }}
             value={academicYear}
             onChange={(e) => {
               const y = e.target.value;
@@ -314,33 +412,90 @@ export default function SettingsPage() {
             ))}
           </select>
 
-          <div className="small">{settingsStatus}</div>
+          <div
+            className="small"
+            style={{
+              color: settingsStatus ? "#315fcb" : "#7c8aa5",
+              fontWeight: 500,
+            }}
+          >
+            {settingsStatus}
+          </div>
         </div>
 
-        <div className="hr" />
+        <div className="hr" style={{ opacity: 0.7 }} />
 
-        <div className="section-title" style={{ marginTop: 14 }}>
-          Маппинг колонок (обязательно)
+        <div
+          className="section-title"
+          style={{
+            marginTop: 14,
+            marginBottom: 12,
+            fontSize: 28,
+            fontWeight: 800,
+            color: "#17356f",
+            letterSpacing: "-0.02em",
+          }}
+        >
+          Маппинг колонок
         </div>
 
-        <SelectRow label="ФИО преподавателя" value={cfg.columns.teacher_col} cols={cols} onChange={(v) => setCol("teacher_col", v)} />
-        <SelectRow label="Штатные часы" value={cfg.columns.staff_hours_col} cols={cols} onChange={(v) => setCol("staff_hours_col", v)} />
         <SelectRow
-          label="Почасовые часы (если есть)"
+          label="ФИО преподавателя"
+          value={cfg.columns.teacher_col}
+          cols={cols}
+          onChange={(v) => setCol("teacher_col", v)}
+        />
+        <SelectRow
+          label="Штатные часы"
+          value={cfg.columns.staff_hours_col}
+          cols={cols}
+          onChange={(v) => setCol("staff_hours_col", v)}
+        />
+        <SelectRow
+          label="Почасовые часы"
           value={cfg.columns.hourly_hours_col}
           cols={cols}
           onChange={(v) => setCol("hourly_hours_col", v)}
         />
+        <SelectRow
+          label="Дисциплина"
+          value={cfg.columns.discipline_col}
+          cols={cols}
+          onChange={(v) => setCol("discipline_col", v)}
+        />
+        <SelectRow
+          label="Вид занятий"
+          value={cfg.columns.activity_type_col}
+          cols={cols}
+          onChange={(v) => setCol("activity_type_col", v)}
+        />
+        <SelectRow
+          label="Группа"
+          value={cfg.columns.group_col}
+          cols={cols}
+          onChange={(v) => setCol("group_col", v)}
+        />
+        <SelectRow
+          label="ОП / программа"
+          value={cfg.columns.op_col}
+          cols={cols}
+          onChange={(v) => setCol("op_col", v)}
+        />
 
-        <SelectRow label="Дисциплина" value={cfg.columns.discipline_col} cols={cols} onChange={(v) => setCol("discipline_col", v)} />
-        <SelectRow label="Вид занятий" value={cfg.columns.activity_type_col} cols={cols} onChange={(v) => setCol("activity_type_col", v)} />
-        <SelectRow label="Группа" value={cfg.columns.group_col} cols={cols} onChange={(v) => setCol("group_col", v)} />
-        <SelectRow label="ОП / программа (если есть)" value={cfg.columns.op_col} cols={cols} onChange={(v) => setCol("op_col", v)} />
+        <div className="hr" style={{ opacity: 0.7 }} />
 
-        <div className="hr" />
-
-        <div className="section-title" style={{ marginTop: 14 }}>
-          Названия видов занятий (через запятую)
+        <div
+          className="section-title"
+          style={{
+            marginTop: 14,
+            marginBottom: 12,
+            fontSize: 28,
+            fontWeight: 800,
+            color: "#17356f",
+            letterSpacing: "-0.02em",
+          }}
+        >
+          Названия видов занятий
         </div>
 
         <TextRow
@@ -356,11 +511,24 @@ export default function SettingsPage() {
           placeholder="лаб, пра, lab, pract"
         />
 
-        <div className="hr" style={{ marginTop: 18 }} />
+        <div className="hr" style={{ marginTop: 18, opacity: 0.7 }} />
 
         <div style={{ marginTop: 6 }}>
-          <button className="btn btn-outline" onClick={() => setAdvancedOpen((v) => !v)} type="button">
-            {advancedOpen ? "Скрыть расширенные настройки" : "Расширенные настройки"}
+          <button
+            className="btn btn-outline"
+            onClick={() => setAdvancedOpen((v) => !v)}
+            type="button"
+            style={{
+              borderRadius: 12,
+              height: 44,
+              fontWeight: 700,
+              border: "1px solid #d6e2fb",
+              background: "#fff",
+            }}
+          >
+            {advancedOpen
+              ? "Скрыть расширенные настройки"
+              : "Расширенные настройки"}
           </button>
 
           {advancedOpen ? (
@@ -372,13 +540,37 @@ export default function SettingsPage() {
                 onChange={(arr) => setMergeRuleArray("key_cols", arr)}
               />
 
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-                <div style={{ width: 260, fontWeight: 700 }}>Откуда брать список групп (приоритет)</div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 14,
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  marginBottom: 12,
+                }}
+              >
+                <div
+                  style={{
+                    width: 260,
+                    fontWeight: 700,
+                    color: "#1e3a8a",
+                  }}
+                >
+                  Откуда брать список групп
+                </div>
                 <select
                   className="input"
-                  style={{ width: 260 }}
+                  style={{
+                    width: 260,
+                    height: 48,
+                    borderRadius: 14,
+                    border: "1px solid #d9e3f5",
+                    background: "#f8fbff",
+                  }}
                   value={cfg.merge_rules?.group_priority_type || "lecture"}
-                  onChange={(e) => setMergeRule("group_priority_type", e.target.value)}
+                  onChange={(e) =>
+                    setMergeRule("group_priority_type", e.target.value)
+                  }
                 >
                   <option value="lecture">Лекции</option>
                   <option value="lab_practice">Лаб/практики</option>
@@ -401,29 +593,71 @@ export default function SettingsPage() {
             </div>
           ) : null}
 
-          <div className="actions-row" style={{ marginTop: 12 }}>
-            <button className="btn btn-primary" onClick={saveSettings} disabled={!excelTemplateId}>
+          <div className="actions-row" style={{ marginTop: 14 }}>
+            <button
+              className="btn btn-primary"
+              onClick={saveSettings}
+              disabled={!excelTemplateId}
+              style={{
+                minWidth: 180,
+                height: 48,
+                borderRadius: 14,
+                fontWeight: 800,
+                letterSpacing: "0.02em",
+                boxShadow: "0 12px 24px rgba(58,110,255,0.18)",
+              }}
+            >
               СОХРАНИТЬ
             </button>
           </div>
         </div>
 
-        <div className="hr" style={{ marginTop: 18 }} />
+        <div className="hr" style={{ marginTop: 18, opacity: 0.7 }} />
 
-        <div className="section-title" style={{ marginTop: 14 }}>
+        <div
+          className="section-title"
+          style={{
+            marginTop: 14,
+            marginBottom: 12,
+            fontSize: 28,
+            fontWeight: 800,
+            color: "#17356f",
+            letterSpacing: "-0.02em",
+          }}
+        >
           Плейсхолдеры и blocks
         </div>
 
-        <div className="small" style={{ marginBottom: 10 }}>
+        <div
+          className="small"
+          style={{
+            marginBottom: 10,
+            color: "#7c8aa5",
+          }}
+        >
           {phStatus || blocksStatus}
         </div>
 
-        <Section title="teacher.*" items={grouped.stableTeacher} copyField="example" />
+        <Section
+          title="teacher.*"
+          items={grouped.stableTeacher}
+          copyField="example"
+        />
         <Section title="row.*" items={grouped.dynamicRow} copyField="example" />
         <BlocksSection title="blocks.*" blocks={blocksData.blocks || []} />
 
         <div className="actions-row" style={{ marginTop: 16 }}>
-          <button className="btn btn-primary" onClick={() => navigate("/docx-upload")}>
+          <button
+            className="btn btn-primary"
+            onClick={() => navigate("/docx-upload")}
+            style={{
+              minWidth: 150,
+              height: 46,
+              borderRadius: 14,
+              fontWeight: 800,
+              boxShadow: "0 12px 24px rgba(58,110,255,0.18)",
+            }}
+          >
             ДАЛЕЕ
           </button>
         </div>
@@ -434,9 +668,38 @@ export default function SettingsPage() {
 
 function SelectRow({ label, value, cols, onChange }) {
   return (
-    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-      <div style={{ width: 260, fontWeight: 700 }}>{label}</div>
-      <select className="input" style={{ width: 680 }} value={value || ""} onChange={(e) => onChange(e.target.value)}>
+    <div
+      style={{
+        display: "flex",
+        gap: 14,
+        alignItems: "center",
+        flexWrap: "wrap",
+        marginBottom: 12,
+      }}
+    >
+      <div
+        style={{
+          width: 260,
+          fontWeight: 700,
+          color: "#1e3a8a",
+        }}
+      >
+        {label}
+      </div>
+
+      <select
+        className="input"
+        style={{
+          width: 680,
+          height: 48,
+          borderRadius: 14,
+          border: "1px solid #d9e3f5",
+          background: "#f8fbff",
+          boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
+        }}
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+      >
         <option value="">—</option>
         {cols.map((c) => (
           <option key={c.column_name} value={c.column_name}>
@@ -450,9 +713,39 @@ function SelectRow({ label, value, cols, onChange }) {
 
 function TextRow({ label, value, onChange, placeholder }) {
   return (
-    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-      <div style={{ width: 260, fontWeight: 700 }}>{label}</div>
-      <input className="input" style={{ width: 680 }} value={value || ""} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+    <div
+      style={{
+        display: "flex",
+        gap: 14,
+        alignItems: "center",
+        flexWrap: "wrap",
+        marginBottom: 12,
+      }}
+    >
+      <div
+        style={{
+          width: 260,
+          fontWeight: 700,
+          color: "#1e3a8a",
+        }}
+      >
+        {label}
+      </div>
+
+      <input
+        className="input"
+        style={{
+          width: 680,
+          height: 48,
+          borderRadius: 14,
+          border: "1px solid #d9e3f5",
+          background: "#f8fbff",
+          boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
+        }}
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
     </div>
   );
 }
@@ -468,24 +761,41 @@ function CheckboxMultiSelect({ label, options, value, onChange }) {
   }
 
   return (
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ fontWeight: 700, marginBottom: 8 }}>{label}</div>
+    <div style={{ marginBottom: 14 }}>
+      <div
+        style={{
+          fontWeight: 700,
+          marginBottom: 8,
+          color: "#1e3a8a",
+        }}
+      >
+        {label}
+      </div>
 
       <div
         className="card"
         style={{
-          borderRadius: 12,
-          padding: 10,
-          border: "1px solid rgba(15,23,42,.10)",
+          borderRadius: 16,
+          padding: 12,
+          border: "1px solid rgba(15,23,42,.08)",
           maxHeight: 220,
           overflow: "auto",
-          background: "#fff",
+          background: "#fbfdff",
+          boxShadow: "inset 0 1px 2px rgba(15,23,42,0.02)",
         }}
       >
         {!options.length ? (
-          <div className="small">Нет колонок</div>
+          <div className="small" style={{ color: "#7c8aa5" }}>
+            Нет колонок
+          </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+              gap: 8,
+            }}
+          >
             {options.map((opt) => (
               <label
                 key={opt}
@@ -493,16 +803,32 @@ function CheckboxMultiSelect({ label, options, value, onChange }) {
                   display: "flex",
                   alignItems: "center",
                   gap: 10,
-                  padding: "8px 10px",
-                  borderRadius: 10,
+                  padding: "10px 12px",
+                  borderRadius: 12,
                   border: "1px solid rgba(15,23,42,.08)",
-                  background: set.has(opt) ? "rgba(47,107,255,.08)" : "transparent",
+                  background: set.has(opt)
+                    ? "rgba(47,107,255,.08)"
+                    : "white",
                   cursor: "pointer",
                   userSelect: "none",
                 }}
               >
-                <input type="checkbox" checked={set.has(opt)} onChange={() => toggle(opt)} style={{ transform: "scale(1.05)" }} />
-                <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 13 }}>{opt}</span>
+                <input
+                  type="checkbox"
+                  checked={set.has(opt)}
+                  onChange={() => toggle(opt)}
+                  style={{ transform: "scale(1.05)" }}
+                />
+                <span
+                  style={{
+                    fontFamily:
+                      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                    fontSize: 13,
+                    color: "#1f2f4d",
+                  }}
+                >
+                  {opt}
+                </span>
               </label>
             ))}
           </div>
@@ -515,31 +841,134 @@ function CheckboxMultiSelect({ label, options, value, onChange }) {
 function Section({ title, items, copyField }) {
   return (
     <div style={{ marginTop: 18 }}>
-      <div className="section-title">{title}</div>
+      <div
+        className="section-title"
+        style={{
+          fontSize: 24,
+          fontWeight: 800,
+          color: "#17356f",
+          marginBottom: 10,
+        }}
+      >
+        {title}
+      </div>
 
-      <div className="table-wrap">
-        <table className="table">
+      <div
+        className="table-wrap"
+        style={{
+          overflowX: "auto",
+          borderRadius: 20,
+          border: "1px solid #e4ebf7",
+          background: "#fff",
+        }}
+      >
+        <table
+          className="table"
+          style={{
+            marginTop: 0,
+            minWidth: 900,
+          }}
+        >
           <thead>
             <tr>
-              <th>Placeholder</th>
-              <th>Описание</th>
-              <th>Пример</th>
-              <th style={{ width: 120 }}>Copy</th>
+              <th
+                style={{
+                  background: "#f7faff",
+                  color: "#5f7195",
+                  fontWeight: 800,
+                  fontSize: 14,
+                  padding: "18px 16px",
+                }}
+              >
+                Placeholder
+              </th>
+              <th
+                style={{
+                  background: "#f7faff",
+                  color: "#5f7195",
+                  fontWeight: 800,
+                  fontSize: 14,
+                  padding: "18px 16px",
+                }}
+              >
+                Описание
+              </th>
+              <th
+                style={{
+                  background: "#f7faff",
+                  color: "#5f7195",
+                  fontWeight: 800,
+                  fontSize: 14,
+                  padding: "18px 16px",
+                }}
+              >
+                Пример
+              </th>
+              <th
+                style={{
+                  width: 120,
+                  background: "#f7faff",
+                  color: "#5f7195",
+                  fontWeight: 800,
+                  fontSize: 14,
+                  padding: "18px 16px",
+                }}
+              >
+                Copy
+              </th>
             </tr>
           </thead>
           <tbody>
             {items.length === 0 ? (
               <tr>
-                <td colSpan="4">Нет данных</td>
+                <td
+                  colSpan="4"
+                  style={{
+                    textAlign: "center",
+                    padding: "28px 16px",
+                    color: "#7c8aa5",
+                    fontWeight: 500,
+                  }}
+                >
+                  Нет данных
+                </td>
               </tr>
             ) : (
               items.map((p) => (
                 <tr key={p.placeholder_name}>
-                  <td style={{ fontWeight: 800 }}>{p.placeholder_name}</td>
-                  <td>{p.description || ""}</td>
-                  <td style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}>{p[copyField] || ""}</td>
-                  <td>
-                    <button className="btn btn-primary" onClick={() => copyToClipboard(p[copyField] || "")}>
+                  <td
+                    style={{
+                      fontWeight: 800,
+                      color: "#17356f",
+                      padding: "18px 16px",
+                    }}
+                  >
+                    {p.placeholder_name}
+                  </td>
+                  <td style={{ padding: "18px 16px", color: "#1f2f4d" }}>
+                    {p.description || ""}
+                  </td>
+                  <td
+                    style={{
+                      padding: "18px 16px",
+                      color: "#556987",
+                      fontFamily:
+                        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                    }}
+                  >
+                    {p[copyField] || ""}
+                  </td>
+                  <td style={{ padding: "14px 16px" }}>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => copyToClipboard(p[copyField] || "")}
+                      style={{
+                        borderRadius: 12,
+                        height: 40,
+                        minWidth: 90,
+                        fontWeight: 700,
+                      }}
+                    >
                       Copy
                     </button>
                   </td>
@@ -556,33 +985,135 @@ function Section({ title, items, copyField }) {
 function BlocksSection({ title, blocks }) {
   return (
     <div style={{ marginTop: 18 }}>
-      <div className="section-title">{title}</div>
+      <div
+        className="section-title"
+        style={{
+          fontSize: 24,
+          fontWeight: 800,
+          color: "#17356f",
+          marginBottom: 10,
+        }}
+      >
+        {title}
+      </div>
 
-      <div className="table-wrap">
-        <table className="table">
+      <div
+        className="table-wrap"
+        style={{
+          overflowX: "auto",
+          borderRadius: 20,
+          border: "1px solid #e4ebf7",
+          background: "#fff",
+        }}
+      >
+        <table
+          className="table"
+          style={{
+            marginTop: 0,
+            minWidth: 980,
+          }}
+        >
           <thead>
             <tr>
-              <th>Block</th>
-              <th>Описание</th>
-              <th>Snippet</th>
-              <th style={{ width: 120 }}>Copy</th>
+              <th
+                style={{
+                  background: "#f7faff",
+                  color: "#5f7195",
+                  fontWeight: 800,
+                  fontSize: 14,
+                  padding: "18px 16px",
+                }}
+              >
+                Block
+              </th>
+              <th
+                style={{
+                  background: "#f7faff",
+                  color: "#5f7195",
+                  fontWeight: 800,
+                  fontSize: 14,
+                  padding: "18px 16px",
+                }}
+              >
+                Описание
+              </th>
+              <th
+                style={{
+                  background: "#f7faff",
+                  color: "#5f7195",
+                  fontWeight: 800,
+                  fontSize: 14,
+                  padding: "18px 16px",
+                }}
+              >
+                Snippet
+              </th>
+              <th
+                style={{
+                  width: 120,
+                  background: "#f7faff",
+                  color: "#5f7195",
+                  fontWeight: 800,
+                  fontSize: 14,
+                  padding: "18px 16px",
+                }}
+              >
+                Copy
+              </th>
             </tr>
           </thead>
           <tbody>
             {!blocks.length ? (
               <tr>
-                <td colSpan="4">Нет blocks</td>
+                <td
+                  colSpan="4"
+                  style={{
+                    textAlign: "center",
+                    padding: "28px 16px",
+                    color: "#7c8aa5",
+                    fontWeight: 500,
+                  }}
+                >
+                  Нет blocks
+                </td>
               </tr>
             ) : (
               blocks.map((b) => (
                 <tr key={b.key}>
-                  <td style={{ fontWeight: 800 }}>{b.key}</td>
-                  <td>{b.title || ""}</td>
-                  <td style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", whiteSpace: "pre-wrap" }}>
+                  <td
+                    style={{
+                      fontWeight: 800,
+                      color: "#17356f",
+                      padding: "18px 16px",
+                    }}
+                  >
+                    {b.key}
+                  </td>
+                  <td style={{ padding: "18px 16px", color: "#1f2f4d" }}>
+                    {b.title || ""}
+                  </td>
+                  <td
+                    style={{
+                      padding: "18px 16px",
+                      color: "#556987",
+                      whiteSpace: "pre-wrap",
+                      fontFamily:
+                        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                    }}
+                  >
                     {b.snippet || ""}
                   </td>
-                  <td>
-                    <button className="btn btn-primary" onClick={() => copyToClipboard(b.snippet || "")}>
+                  <td style={{ padding: "14px 16px" }}>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => copyToClipboard(b.snippet || "")}
+                      style={{
+                        borderRadius: 12,
+                        height: 40,
+                        minWidth: 90,
+                        fontWeight: 700,
+                      }}
+                    >
                       Copy
                     </button>
                   </td>
