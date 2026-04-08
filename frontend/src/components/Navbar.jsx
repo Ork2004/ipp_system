@@ -15,6 +15,7 @@ export default function Navbar() {
     localStorage.removeItem("department_id");
     localStorage.removeItem("excel_template_id");
     localStorage.removeItem("docx_template_id");
+    localStorage.removeItem("raw_template_id");
     localStorage.removeItem("academic_year");
     navigate("/login");
   }
@@ -34,20 +35,17 @@ export default function Navbar() {
                   <NavLink to="/excel-upload" className={linkClass}>
                     Нагрузка
                   </NavLink>
-                  <NavLink to="/workload-data" className={linkClass}>
-                    Данные
-                  </NavLink>
                   <NavLink to="/raw-template-upload" className={linkClass}>
-                    Raw шаблон
-                  </NavLink>
-                  <NavLink to="/manual-tables" className={linkClass}>
-                    Таблицы
+                    Шаблон
                   </NavLink>
                   <NavLink to="/settings" className={linkClass}>
                     Настройка
                   </NavLink>
-                  <NavLink to="/docx-upload" className={linkClass}>
-                    ИПП
+                  <NavLink to="/manual-tables" className={linkClass}>
+                    Таблицы
+                  </NavLink>
+                  <NavLink to="/workload-data" className={linkClass}>
+                    Данные
                   </NavLink>
                 </>
               ) : null}
