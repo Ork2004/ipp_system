@@ -6,7 +6,7 @@ from docxtpl import DocxTemplate
 from backend.app.database import get_connection
 from backend.app.config import GENERATED_DIR
 from backend.app.utils.blocks import detect_semester_columns, build_block_rows
-
+from backend.app.utils.manual_docx_filler import apply_manual_fill_to_generated_docx
 
 def _get_teacher(cur, teacher_id: int) -> dict:
     cur.execute("""
@@ -171,6 +171,14 @@ def generate_docx_for_teacher(
         safe_name = re.sub(r"[^0-9A-Za-zА-Яа-я_]+", "_", teacher["full_name"]).strip("_")
         output_path = str((GENERATED_DIR / f"IPP_{safe_name}_{academic_year}.docx").resolve())
         tpl.save(output_path)
+
+        apply_manual_fill_to_generated_docx(
+            teacher_id=teacher_id,
+            department_id=department_id,
+            academic_year=academic_year,
+            output_path=output_path,
+        )
+
         return output_path
 
     finally:
