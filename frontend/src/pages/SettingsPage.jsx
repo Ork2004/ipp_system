@@ -37,8 +37,8 @@ export default function SettingsPage() {
     },
     template_bindings: {
       teaching_load: {
-        staff: { sem1: {}, sem2: {} },
-        hourly: { sem1: {}, sem2: {} },
+        staff: {},
+        hourly: {},
       },
     },
   });
@@ -124,14 +124,8 @@ export default function SettingsPage() {
           },
           template_bindings: {
             teaching_load: {
-              staff: {
-                sem1: loaded.template_bindings?.teaching_load?.staff?.sem1 || {},
-                sem2: loaded.template_bindings?.teaching_load?.staff?.sem2 || {},
-              },
-              hourly: {
-                sem1: loaded.template_bindings?.teaching_load?.hourly?.sem1 || {},
-                sem2: loaded.template_bindings?.teaching_load?.hourly?.sem2 || {},
-              },
+              staff: loaded.template_bindings?.teaching_load?.staff || {},
+              hourly: loaded.template_bindings?.teaching_load?.hourly || {},
             },
           },
         }));
@@ -225,16 +219,13 @@ export default function SettingsPage() {
     }));
   }
 
-  function setTeachingLoadBinding(loadKind, semKey, tableId) {
+  function setTeachingLoadTable(loadKind, tableId) {
     setCfg((prev) => ({
       ...prev,
       template_bindings: {
         teaching_load: {
           ...prev.template_bindings.teaching_load,
-          [loadKind]: {
-            ...prev.template_bindings.teaching_load[loadKind],
-            [semKey]: tableId ? { raw_table_id: Number(tableId) } : {},
-          },
+          [loadKind]: tableId ? { raw_table_id: Number(tableId) } : {},
         },
       },
     }));
@@ -295,8 +286,9 @@ export default function SettingsPage() {
 
           <div className="small" style={{ display: "grid", gap: 6 }}>
             <div>1. Какие колонки Excel использовать для генерации</div>
-            <div>2. Какие таблицы шаблона относятся к штатной и почасовой нагрузке</div>
-            <div>3. Как система объединяет строки и считает часы</div>
+            <div>2. Какая таблица шаблона является штатной нагрузкой</div>
+            <div>3. Какая таблица шаблона является почасовой нагрузкой</div>
+            <div>4. Как система объединяет строки и считает часы</div>
           </div>
         </div>
 
@@ -403,31 +395,17 @@ export default function SettingsPage() {
         <div className="section-title">Привязка таблиц нагрузки</div>
 
         <TeachingLoadBinding
-          label="Штатная 1 семестр"
+          label="Таблица штатной нагрузки"
           tables={tables}
-          value={cfg.template_bindings?.teaching_load?.staff?.sem1?.raw_table_id || ""}
-          onChange={(v) => setTeachingLoadBinding("staff", "sem1", v)}
+          value={cfg.template_bindings?.teaching_load?.staff?.raw_table_id || ""}
+          onChange={(v) => setTeachingLoadTable("staff", v)}
         />
 
         <TeachingLoadBinding
-          label="Штатная 2 семестр"
+          label="Таблица почасовой нагрузки"
           tables={tables}
-          value={cfg.template_bindings?.teaching_load?.staff?.sem2?.raw_table_id || ""}
-          onChange={(v) => setTeachingLoadBinding("staff", "sem2", v)}
-        />
-
-        <TeachingLoadBinding
-          label="Почасовая 1 семестр"
-          tables={tables}
-          value={cfg.template_bindings?.teaching_load?.hourly?.sem1?.raw_table_id || ""}
-          onChange={(v) => setTeachingLoadBinding("hourly", "sem1", v)}
-        />
-
-        <TeachingLoadBinding
-          label="Почасовая 2 семестр"
-          tables={tables}
-          value={cfg.template_bindings?.teaching_load?.hourly?.sem2?.raw_table_id || ""}
-          onChange={(v) => setTeachingLoadBinding("hourly", "sem2", v)}
+          value={cfg.template_bindings?.teaching_load?.hourly?.raw_table_id || ""}
+          onChange={(v) => setTeachingLoadTable("hourly", v)}
         />
 
         <div className="actions-row" style={{ marginTop: 20 }}>
