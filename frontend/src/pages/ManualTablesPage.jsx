@@ -4,25 +4,16 @@ import { api } from "../api";
 export default function ManualTablesPage() {
   const role = localStorage.getItem("role") || "guest";
 
-  const [departmentId] = useState(
-    Number(localStorage.getItem("department_id") || 0)
-  );
-  const [academicYear, setAcademicYear] = useState(
-    localStorage.getItem("academic_year") || "2025-2026"
-  );
-  const [rawTemplateId, setRawTemplateId] = useState(
-    Number(localStorage.getItem("raw_template_id") || 0)
-  );
-  const [teacherId, setTeacherId] = useState(
-    Number(localStorage.getItem("teacher_id") || 0)
-  );
+  const [departmentId] = useState(Number(localStorage.getItem("department_id") || 0));
+  const [academicYear, setAcademicYear] = useState(localStorage.getItem("academic_year") || "2025-2026");
+  const [rawTemplateId, setRawTemplateId] = useState(Number(localStorage.getItem("raw_template_id") || 0));
+  const [teacherId, setTeacherId] = useState(Number(localStorage.getItem("teacher_id") || 0));
 
   const [teachers, setTeachers] = useState([]);
-
   const [tables, setTables] = useState([]);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
-  const [savingTypeId, setSavingTypeId] = useState(0);
+
   const [savingStatic, setSavingStatic] = useState(false);
   const [openTableIds, setOpenTableIds] = useState({});
   const [formValues, setFormValues] = useState({});
@@ -48,6 +39,7 @@ export default function ManualTablesPage() {
 
   async function loadTeachers() {
     if (role !== "admin" || !departmentId) return;
+
     try {
       const res = await api.get("/teachers", {
         params: { department_id: departmentId },
@@ -108,16 +100,30 @@ export default function ManualTablesPage() {
     setLoopValues(nextLoopValues);
   }
 
+  function mergeOpenState(list) {
+    setOpenTableIds((prev) => {
+      const next = {};
+      list.forEach((t, idx) => {
+        if (Object.prototype.hasOwnProperty.call(prev, t.id)) {
+          next[t.id] = prev[t.id];
+        } else {
+          next[t.id] = idx < 2;
+        }
+      });
+      return next;
+    });
+  }
+
   async function loadForm(templateId, currentTeacherId) {
     if (!templateId) {
       setTables([]);
-      setStatus("Нет raw_template_id");
+      setStatus("Шаблон не найден");
       return;
     }
 
     if (role === "admin" && !currentTeacherId) {
       setTables([]);
-      setStatus("Выбери преподавателя");
+      setStatus("Выберите преподавателя");
       return;
     }
 
@@ -133,19 +139,15 @@ export default function ManualTablesPage() {
 
       const res = await api.get("/manual-fill/form", { params });
       const list = Array.isArray(res.data?.tables) ? res.data.tables : [];
+
       setTables(list);
       buildInitialStateFromTables(list);
-
-      const opened = {};
-      list.forEach((t, idx) => {
-        opened[t.id] = idx < 3;
-      });
-      setOpenTableIds(opened);
+      mergeOpenState(list);
 
       setStatus("");
     } catch (e) {
       console.error(e);
-      setStatus(e?.response?.data?.detail || "Ошибка загрузки формы");
+      setStatus(e?.response?.data?.detail || "Ошибка загрузки таблиц");
       setTables([]);
       setFormValues({});
       setLoopValues({});
@@ -164,7 +166,7 @@ export default function ManualTablesPage() {
       }
 
       if (!id) {
-        setStatus("Raw шаблон для этого года не найден");
+        setStatus("Шаблон для этого года не найден");
         setTables([]);
         return;
       }
@@ -180,7 +182,6 @@ export default function ManualTablesPage() {
 
   useEffect(() => {
     loadTeachers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -201,14 +202,12 @@ export default function ManualTablesPage() {
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", onVis);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (role === "admin" && teacherId && rawTemplateId) {
       loadForm(rawTemplateId, teacherId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teacherId]);
 
   async function handleChangeYear(nextYear) {
@@ -216,38 +215,20 @@ export default function ManualTablesPage() {
     localStorage.setItem("academic_year", nextYear);
     localStorage.removeItem("raw_template_id");
     setRawTemplateId(0);
+    setOpenTableIds({});
 
     try {
       setStatus("Поиск шаблона...");
       const id = await resolveRawTemplateIdByYear(nextYear);
       if (!id) {
         setTables([]);
-        setStatus("Raw шаблон для этого года не найден");
+        setStatus("Шаблон для этого года не найден");
         return;
       }
       await loadForm(id, teacherId);
     } catch (e) {
       console.error(e);
       setStatus(e?.response?.data?.detail || "Ошибка переключения года");
-    }
-  }
-
-  async function updateTableType(rawTableId, nextType) {
-    try {
-      setSavingTypeId(rawTableId);
-      setStatus("Сохранение типа таблицы...");
-
-      await api.patch(`/raw-template/table/${rawTableId}/type`, {
-        table_type: nextType,
-      });
-
-      await loadForm(rawTemplateId, teacherId);
-      setStatus("Тип таблицы сохранен ✅");
-    } catch (e) {
-      console.error(e);
-      setStatus(e?.response?.data?.detail || "Ошибка сохранения типа");
-    } finally {
-      setSavingTypeId(0);
     }
   }
 
@@ -268,7 +249,7 @@ export default function ManualTablesPage() {
   async function saveStaticTable(table) {
     try {
       setSavingStatic(true);
-      setStatus("Сохранение таблицы...");
+      setStatus("Сохранение...");
 
       const values = (table.editable_values || []).map((item) => ({
         raw_cell_id: item.raw_cell_id,
@@ -281,11 +262,11 @@ export default function ManualTablesPage() {
         values,
       });
 
-      setStatus("Данные таблицы сохранены ✅");
+      setStatus("Сохранено ✅");
       await loadForm(rawTemplateId, teacherId);
     } catch (e) {
       console.error(e);
-      setStatus(e?.response?.data?.detail || "Ошибка сохранения static таблицы");
+      setStatus(e?.response?.data?.detail || "Ошибка сохранения");
     } finally {
       setSavingStatic(false);
     }
@@ -310,26 +291,14 @@ export default function ManualTablesPage() {
       setAddingLoopTableId(table.id);
       setStatus("Добавление строки...");
 
-      const res = await api.post("/manual-fill/add-loop-row", {
+      await api.post("/manual-fill/add-loop-row", {
         raw_template_id: rawTemplateId,
         raw_table_id: table.id,
         teacher_id: role === "admin" ? teacherId : undefined,
       });
 
-      const loopRowId = Number(res.data?.loop_row_id || 0);
-      if (loopRowId) {
-        const emptyRow = {};
-        for (let i = 0; i < Number(table.col_count || 0); i += 1) {
-          emptyRow[i] = "";
-        }
-        setLoopValues((prev) => ({
-          ...prev,
-          [loopRowId]: emptyRow,
-        }));
-      }
-
       await loadForm(rawTemplateId, teacherId);
-      setStatus("Новая строка добавлена ✅");
+      setStatus("Строка добавлена ✅");
     } catch (e) {
       console.error(e);
       setStatus(e?.response?.data?.detail || "Ошибка добавления строки");
@@ -393,9 +362,30 @@ export default function ManualTablesPage() {
 
   return (
     <div className="container">
-      <div className="page-title">Заполнение таблиц шаблона</div>
+      <div className="page-title">Заполнение разделов</div>
 
       <div className="card card-pad">
+        <div
+          className="card"
+          style={{
+            padding: 14,
+            borderRadius: 14,
+            border: "1px solid rgba(15,23,42,.10)",
+            background: "#f8fbff",
+            marginBottom: 16,
+          }}
+        >
+          <div style={{ fontWeight: 800, marginBottom: 8 }}>
+            Что здесь делается
+          </div>
+
+          <div className="small" style={{ display: "grid", gap: 6 }}>
+            <div>1. Выбирается учебный год и преподаватель</div>
+            <div>2. Заполняются только те разделы, которых нет в Excel</div>
+            <div>3. Все введённые данные сохраняются для дальнейшей генерации ИПП</div>
+          </div>
+        </div>
+
         <div
           style={{
             display: "flex",
@@ -436,11 +426,6 @@ export default function ManualTablesPage() {
             </select>
           ) : null}
 
-          <div className="small">
-            raw_template_id: {rawTemplateId || "—"} | department_id:{" "}
-            {departmentId || "—"}
-          </div>
-
           <div className="small">{loading ? "Загрузка..." : status}</div>
         </div>
 
@@ -448,8 +433,7 @@ export default function ManualTablesPage() {
 
         {!tables.length && !loading ? (
           <div className="small" style={{ padding: "8px 0" }}>
-            Нет таблиц. Сначала загрузи raw шаблон на странице “Шаблон без
-            плейсхолдеров”.
+            Нет таблиц для заполнения
           </div>
         ) : null}
 
@@ -482,79 +466,20 @@ export default function ManualTablesPage() {
                 >
                   <div style={{ display: "grid", gap: 4 }}>
                     <div style={{ fontWeight: 800 }}>
-                      Таблица #{table.table_index + 1}
+                      Таблица {Number(table.table_index) + 1}
                     </div>
                     <div className="small">
-                      {table.row_count} строк • {table.col_count} колонок
-                    </div>
-                    <div className="small">
-                      {table.has_total_row ? "Есть строка Итого" : "Без строки Итого"}
-                      {table.loop_template_row_index !== null &&
-                      table.loop_template_row_index !== undefined
-                        ? ` • loop row: ${table.loop_template_row_index + 1}`
-                        : ""}
+                      {table.table_type === "loop" ? "Таблица со строками" : "Обычная таблица"}
                     </div>
                   </div>
 
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: 10,
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <select
-                      className="input"
-                      style={{ width: 160 }}
-                      value={table.table_type || "static"}
-                      onChange={(e) =>
-                        updateTableType(table.id, e.target.value)
-                      }
-                      disabled={savingTypeId === table.id}
-                    >
-                      <option value="static">static</option>
-                      <option value="loop">loop</option>
-                    </select>
-
-                    <button
-                      className="btn btn-outline"
-                      onClick={() => toggleOpen(table.id)}
-                    >
-                      {openTableIds[table.id] ? "Скрыть" : "Открыть"}
-                    </button>
-                  </div>
+                  <button className="btn btn-outline" onClick={() => toggleOpen(table.id)}>
+                    {openTableIds[table.id] ? "Скрыть" : "Открыть"}
+                  </button>
                 </div>
 
                 {openTableIds[table.id] ? (
                   <div style={{ padding: 14 }}>
-                    <div
-                      style={{
-                        display: "grid",
-                        gap: 8,
-                        marginBottom: 12,
-                      }}
-                    >
-                      <div className="small">
-                        <b>Тип:</b> {table.table_type || "static"}
-                      </div>
-                      <div className="small">
-                        <b>Header signature:</b>{" "}
-                        <span
-                          style={{
-                            fontFamily:
-                              "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                          }}
-                        >
-                          {table.header_signature || "—"}
-                        </span>
-                      </div>
-                      <div className="small">
-                        <b>Подсказки колонок:</b>{" "}
-                        {(table.column_hints || []).join(" | ") || "—"}
-                      </div>
-                    </div>
-
                     {table.table_type === "static" ? (
                       <>
                         <StaticTableGrid
@@ -569,14 +494,13 @@ export default function ManualTablesPage() {
                             onClick={() => saveStaticTable(table)}
                             disabled={savingStatic}
                           >
-                            {savingStatic ? "Сохранение..." : "Сохранить таблицу"}
+                            {savingStatic ? "Сохранение..." : "Сохранить"}
                           </button>
                         </div>
                       </>
                     ) : (
                       <LoopTableEditor
                         table={table}
-                        loopValues={loopValues}
                         getLoopRowValue={getLoopRowValue}
                         setLoopRowValue={setLoopRowValue}
                         onAddRow={() => addLoopRow(table)}
@@ -598,6 +522,62 @@ export default function ManualTablesPage() {
   );
 }
 
+function compressRow(row) {
+  const out = [];
+  let i = 0;
+
+  while (i < row.length) {
+    const cell = row[i];
+    const text = String(cell?.text || "").trim();
+    const editable = !!cell?.editable;
+
+    if (editable) {
+      out.push({
+        type: "cell",
+        cell,
+        span: 1,
+      });
+      i += 1;
+      continue;
+    }
+
+    if (!text) {
+      out.push({
+        type: "cell",
+        cell,
+        span: 1,
+      });
+      i += 1;
+      continue;
+    }
+
+    let span = 1;
+    let j = i + 1;
+
+    while (j < row.length) {
+      const next = row[j];
+      const nextText = String(next?.text || "").trim();
+      const nextEditable = !!next?.editable;
+
+      if (nextEditable) break;
+      if (nextText !== text) break;
+
+      span += 1;
+      j += 1;
+    }
+
+    out.push({
+      type: "cell",
+      cell,
+      span,
+    });
+
+    i = j;
+  }
+
+  return out;
+}
+
 function StaticTableGrid({ table, formValues, onChange }) {
   const matrix = Array.isArray(table.matrix) ? table.matrix : [];
 
@@ -606,8 +586,10 @@ function StaticTableGrid({ table, formValues, onChange }) {
       <table
         className="table"
         style={{
-          minWidth: Math.max(760, (table.col_count || 1) * 160),
+          minWidth: Math.max(760, (table.col_count || 1) * 140),
           tableLayout: "fixed",
+          borderCollapse: "separate",
+          borderSpacing: 0,
         }}
       >
         <tbody>
@@ -616,54 +598,56 @@ function StaticTableGrid({ table, formValues, onChange }) {
               <td>Нет данных</td>
             </tr>
           ) : (
-            matrix.map((row, rowIndex) => (
-              <tr key={`row-${rowIndex}`}>
-                {row.map((cell) => (
-                  <td
-                    key={cell.cell_key}
-                    style={{
-                      verticalAlign: "top",
-                      background: cell.editable
-                        ? "rgba(34,197,94,.06)"
-                        : "#fff",
-                      borderTop: "1px solid rgba(15,23,42,.06)",
-                      minWidth: 160,
-                    }}
-                  >
-                    {cell.editable ? (
-                      <input
-                        className="input"
-                        value={formValues[cell.raw_cell_id] ?? ""}
-                        onChange={(e) =>
-                          onChange(cell.raw_cell_id, e.target.value)
-                        }
-                        placeholder="Введите значение"
-                        style={{
-                          background: "#fff",
-                          borderColor: "rgba(34,197,94,.30)",
-                        }}
-                      />
-                    ) : (
-                      <div style={{ whiteSpace: "pre-wrap" }}>
-                        {cell.text || ""}
-                      </div>
-                    )}
+            matrix.map((row, rowIndex) => {
+              const compressed = compressRow(row);
 
-                    <div
-                      style={{
-                        marginTop: 6,
-                        fontSize: 11,
-                        color: "#64748b",
-                        fontFamily:
-                          "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                      }}
-                    >
-                      r{cell.row_index + 1}:c{cell.col_index + 1}
-                    </div>
-                  </td>
-                ))}
-              </tr>
-            ))
+              return (
+                <tr key={`row-${rowIndex}`}>
+                  {compressed.map((item, idx) => {
+                    const cell = item.cell;
+
+                    return (
+                      <td
+                        key={`${cell.cell_key}-${idx}`}
+                        colSpan={item.span}
+                        style={{
+                          verticalAlign: "top",
+                          background: cell.editable ? "rgba(34,197,94,.05)" : "#fff",
+                          borderTop: "1px solid rgba(15,23,42,.06)",
+                          borderRight: "1px solid rgba(15,23,42,.04)",
+                          minWidth: 140,
+                          padding: 12,
+                        }}
+                      >
+                        {cell.editable ? (
+                          <input
+                            className="input"
+                            value={formValues[cell.raw_cell_id] ?? ""}
+                            onChange={(e) => onChange(cell.raw_cell_id, e.target.value)}
+                            placeholder="Введите значение"
+                            style={{
+                              background: "#fff",
+                              borderColor: "rgba(34,197,94,.30)",
+                            }}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              whiteSpace: "pre-wrap",
+                              fontSize: 14,
+                              lineHeight: 1.4,
+                              color: "#0f172a",
+                            }}
+                          >
+                            {cell.text || ""}
+                          </div>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })
           )}
         </tbody>
       </table>
@@ -673,7 +657,6 @@ function StaticTableGrid({ table, formValues, onChange }) {
 
 function LoopTableEditor({
   table,
-  loopValues,
   getLoopRowValue,
   setLoopRowValue,
   onAddRow,
@@ -691,65 +674,18 @@ function LoopTableEditor({
 
   return (
     <div>
-      <div style={{ overflowX: "auto" }}>
-        <table
-          className="table"
-          style={{
-            minWidth: Math.max(760, (table.col_count || 1) * 160),
-            tableLayout: "fixed",
-          }}
-        >
-          <tbody>
-            {(table.matrix || []).map((row, rowIndex) => (
-              <tr key={`tpl-row-${rowIndex}`}>
-                {row.map((cell) => (
-                  <td
-                    key={cell.cell_key}
-                    style={{
-                      verticalAlign: "top",
-                      background:
-                        rowIndex === table.loop_template_row_index
-                          ? "rgba(251,191,36,.12)"
-                          : "#fff",
-                      borderTop: "1px solid rgba(15,23,42,.06)",
-                      minWidth: 160,
-                    }}
-                  >
-                    <div style={{ whiteSpace: "pre-wrap" }}>
-                      {cell.text || ""}
-                    </div>
-
-                    <div
-                      style={{
-                        marginTop: 6,
-                        fontSize: 11,
-                        color: "#64748b",
-                        fontFamily:
-                          "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                      }}
-                    >
-                      r{cell.row_index + 1}:c{cell.col_index + 1}
-                    </div>
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
       <div
         style={{
-          marginTop: 12,
+          marginBottom: 12,
           padding: 12,
           borderRadius: 12,
           background: "rgba(47,107,255,.06)",
           border: "1px solid rgba(47,107,255,.12)",
         }}
       >
-        <div style={{ fontWeight: 700, marginBottom: 4 }}>Loop-строки</div>
+        <div style={{ fontWeight: 700, marginBottom: 4 }}>Добавляемые строки</div>
         <div className="small">
-          Шаблонная строка подсвечена. Ниже преподаватель добавляет свои строки.
+          Здесь можно добавлять и редактировать строки этого раздела.
         </div>
       </div>
 
@@ -790,7 +726,7 @@ function LoopTableEditor({
                 }}
               >
                 <div style={{ fontWeight: 700 }}>
-                  Строка #{row.row_order}
+                  Строка {row.row_order}
                 </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -799,9 +735,7 @@ function LoopTableEditor({
                     onClick={() => onSaveRow(row.loop_row_id)}
                     disabled={savingLoopRowId === row.loop_row_id}
                   >
-                    {savingLoopRowId === row.loop_row_id
-                      ? "Сохранение..."
-                      : "Сохранить строку"}
+                    {savingLoopRowId === row.loop_row_id ? "Сохранение..." : "Сохранить"}
                   </button>
 
                   <button
@@ -809,9 +743,7 @@ function LoopTableEditor({
                     onClick={() => onDeleteRow(row.loop_row_id)}
                     disabled={deletingLoopRowId === row.loop_row_id}
                   >
-                    {deletingLoopRowId === row.loop_row_id
-                      ? "Удаление..."
-                      : "Удалить"}
+                    {deletingLoopRowId === row.loop_row_id ? "Удаление..." : "Удалить"}
                   </button>
                 </div>
               </div>
@@ -819,48 +751,39 @@ function LoopTableEditor({
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: `repeat(${Math.max(
-                    1,
-                    Number(table.col_count || 1)
-                  )}, minmax(160px, 1fr))`,
+                  gridTemplateColumns: `repeat(${Math.max(1, Number(table.col_count || 1))}, minmax(160px, 1fr))`,
                   gap: 10,
                 }}
               >
-                {Array.from({ length: Number(table.col_count || 0) }).map(
-                  (_, colIndex) => {
-                    const hint =
-                      table.column_hints?.[colIndex] ||
-                      templateRow?.[colIndex]?.text ||
-                      `Колонка ${colIndex + 1}`;
+                {Array.from({ length: Number(table.col_count || 0) }).map((_, colIndex) => {
+                  const hint =
+                    table.column_hints?.[colIndex] ||
+                    templateRow?.[colIndex]?.text ||
+                    `Колонка ${colIndex + 1}`;
 
-                    return (
-                      <div key={`${row.loop_row_id}-${colIndex}`}>
-                        <div
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 700,
-                            marginBottom: 6,
-                            color: "#334155",
-                          }}
-                        >
-                          {hint}
-                        </div>
-                        <input
-                          className="input"
-                          value={getLoopRowValue(row.loop_row_id, colIndex)}
-                          onChange={(e) =>
-                            setLoopRowValue(
-                              row.loop_row_id,
-                              colIndex,
-                              e.target.value
-                            )
-                          }
-                          placeholder={`Введите значение`}
-                        />
+                  return (
+                    <div key={`${row.loop_row_id}-${colIndex}`}>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 700,
+                          marginBottom: 6,
+                          color: "#334155",
+                        }}
+                      >
+                        {hint}
                       </div>
-                    );
-                  }
-                )}
+                      <input
+                        className="input"
+                        value={getLoopRowValue(row.loop_row_id, colIndex)}
+                        onChange={(e) =>
+                          setLoopRowValue(row.loop_row_id, colIndex, e.target.value)
+                        }
+                        placeholder="Введите значение"
+                      />
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ))}
