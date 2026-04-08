@@ -96,7 +96,7 @@ export default function RawTemplateUploadPage() {
       return;
     }
     if (currentTemplate) {
-      setStatus("На этот год уже есть raw шаблон. Удали и загрузи заново.");
+      setStatus("На этот год уже есть шаблон. Удали и загрузи заново.");
       return;
     }
     if (!file) {
@@ -106,7 +106,7 @@ export default function RawTemplateUploadPage() {
 
     try {
       setUploading(true);
-      setStatus("Загрузка и сканирование...");
+      setStatus("Загрузка и анализ шаблона...");
 
       const form = new FormData();
       form.append("department_id", String(departmentId));
@@ -139,7 +139,7 @@ export default function RawTemplateUploadPage() {
   }
 
   async function deleteByYear(year) {
-    const ok = window.confirm(`Удалить raw шаблон за ${year}?`);
+    const ok = window.confirm(`Удалить шаблон за ${year}?`);
     if (!ok) return;
 
     try {
@@ -202,9 +202,31 @@ export default function RawTemplateUploadPage() {
 
   return (
     <div className="container">
-      <div className="page-title">Шаблон без плейсхолдеров</div>
+      <div className="page-title">Шаблон ИПП</div>
 
       <div className="card card-pad">
+        <div
+          className="card"
+          style={{
+            padding: 14,
+            borderRadius: 14,
+            border: "1px solid rgba(15,23,42,.10)",
+            background: "#f8fbff",
+            marginBottom: 16,
+          }}
+        >
+          <div style={{ fontWeight: 800, marginBottom: 8 }}>
+            Что делает этот шаг
+          </div>
+
+          <div className="small" style={{ display: "grid", gap: 6 }}>
+            <div>Загружается обычный DOCX без плейсхолдеров</div>
+            <div>Система анализирует таблицы и сохраняет их структуру</div>
+            <div>Потом преподаватель заполняет только ручные разделы</div>
+            <div>Генерация выполняется по этому шаблону автоматически</div>
+          </div>
+        </div>
+
         <div
           style={{
             display: "flex",
@@ -268,11 +290,12 @@ export default function RawTemplateUploadPage() {
         <div className="hr" style={{ marginTop: 18 }} />
 
         <div className="section-title" style={{ marginTop: 14 }}>
-          Загруженные raw шаблоны
+          Загруженные шаблоны
         </div>
 
         <div className="small" style={{ marginBottom: 10 }}>
-          Это DOCX без плейсхолдеров. После загрузки система сканирует таблицы.
+          Здесь хранится основной DOCX шаблон, по которому потом будет
+          собираться итоговый ИПП.
         </div>
 
         <div className="table-wrap" style={{ overflowX: "auto" }}>
@@ -296,7 +319,7 @@ export default function RawTemplateUploadPage() {
                 templates.map((t) => (
                   <tr key={t.id}>
                     <td>{t.academic_year}</td>
-                    <td>{t.source_filename || "raw_template.docx"}</td>
+                    <td>{t.source_filename || "template.docx"}</td>
                     <td>{t.tables_count ?? 0}</td>
                     <td>{t.status || ""}</td>
                     <td>{fmtDateTime(t.created_at)}</td>
