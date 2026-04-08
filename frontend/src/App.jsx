@@ -4,7 +4,6 @@ import Navbar from "./components/Navbar";
 import LoginPage from "./pages/LoginPage";
 import ExcelUploadPage from "./pages/ExcelUploadPage";
 import WorkloadDataPage from "./pages/WorkloadDataPage";
-import DocxUploadPage from "./pages/DocxUploadPage";
 import SettingsPage from "./pages/SettingsPage";
 import GeneratePage from "./pages/GeneratePage";
 import RawTemplateUploadPage from "./pages/RawTemplateUploadPage";
@@ -63,15 +62,6 @@ export default function App() {
         />
 
         <Route
-          path="/docx-upload"
-          element={
-            <RequireAdmin>
-              <DocxUploadPage />
-            </RequireAdmin>
-          }
-        />
-
-        <Route
           path="/settings"
           element={
             <RequireAdmin>
@@ -98,14 +88,6 @@ export default function App() {
           }
         />
 
-        <Route
-          path="/manual-tables"
-          element={
-            <RequireAdmin>
-              <ManualTablesPage />
-            </RequireAdmin>
-          }
-        />
         <Route path="*" element={<Navigate to="/generate" replace />} />
       </Routes>
     </BrowserRouter>
