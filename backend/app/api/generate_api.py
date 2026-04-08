@@ -1,142 +1,114 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
+from app.database import get_conn
+from app.utils.generator import generate_docx_from_raw
 
-from backend.app.config import GENERATED_DIR
-from backend.app.utils.generator import generate_docx_for_teacher
-from backend.app.database import get_connection
-from backend.app.api.auth_api import get_current_user
-from backend.app.utils.generation_history import insert_generation_history
-from backend.app.utils.storage import safe_resolve_in_dir
-
-router = APIRouter(prefix="/generate", tags=["Generate"])
-
-
-def _role_guard(user: dict):
-    if user.get("role") not in ("admin", "teacher"):
-        raise HTTPException(status_code=403, detail="Генерация доступна только admin и teacher")
-
-
-def _check_teacher_access(user: dict, teacher_id: int):
-    role = user.get("role")
-    if role == "teacher":
-        if int(user.get("teacher_id") or -1) != int(teacher_id):
-            raise HTTPException(status_code=403, detail="Преподаватель может генерировать только для себя")
-
-
-def _check_admin_teacher_in_department(admin_user: dict, teacher_id: int):
-    dep = admin_user.get("department_id")
-    if not dep:
-        raise HTTPException(status_code=403, detail="У админа нет department_id в токене")
-
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT department_id FROM teachers WHERE id=%s;", (teacher_id,))
-            r = cur.fetchone()
-            if not r:
-                raise HTTPException(status_code=404, detail="Преподаватель не найден")
-            if r[0] != dep:
-                raise HTTPException(status_code=403, detail="Нельзя генерировать для другой кафедры")
-    finally:
-        conn.close()
-
-
-def _get_excel_docx_ids_for_history(department_id: int, academic_year: str):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT id
-                FROM excel_templates
-                WHERE department_id=%s AND academic_year=%s;
-            """, (department_id, academic_year))
-            ex = cur.fetchone()
-            excel_id = ex[0] if ex else None
-
-            cur.execute("""
-                SELECT id
-                FROM docx_templates
-                WHERE department_id=%s AND academic_year=%s;
-            """, (department_id, academic_year))
-            dx = cur.fetchone()
-            docx_id = dx[0] if dx else None
-
-            return excel_id, docx_id
-    finally:
-        conn.close()
+router = APIRouter(prefix="/generate", tags=["generate"])
 
 
 @router.post("/teacher")
-def generate_for_teacher(payload: dict, user=Depends(get_current_user)):
-    _role_guard(user)
-
-    teacher_id = payload.get("teacher_id")
-    department_id = payload.get("department_id")
-    academic_year = payload.get("academic_year")
+def generate_teacher(data: dict):
+    teacher_id = data.get("teacher_id")
+    department_id = data.get("department_id")
+    academic_year = data.get("academic_year")
 
     if not teacher_id or not department_id or not academic_year:
-        raise HTTPException(status_code=400, detail="teacher_id, department_id, academic_year обязательны")
+        raise HTTPException(status_code=400, detail="missing params")
 
-    teacher_id = int(teacher_id)
-    department_id = int(department_id)
-    academic_year = str(academic_year)
+    conn = get_conn()
+    cur = conn.cursor()
 
-    _check_teacher_access(user, teacher_id)
-    if user.get("role") == "admin":
-        _check_admin_teacher_in_department(user, teacher_id)
-        if user.get("department_id") and department_id != user.get("department_id"):
-            raise HTTPException(status_code=403, detail="department_id должен совпадать с кафедрой админа")
+    cur.execute(
+        """
+        SELECT id, file_path
+        FROM raw_templates
+        WHERE department_id = %s AND academic_year = %s
+        """,
+        (department_id, academic_year),
+    )
+    raw = cur.fetchone()
 
-    excel_template_id_hist, docx_template_id_hist = _get_excel_docx_ids_for_history(department_id, academic_year)
+    if not raw:
+        raise HTTPException(status_code=400, detail="no raw template")
+
+    raw_template_id, file_path = raw
+
+    cur.execute(
+        """
+        SELECT id
+        FROM excel_templates
+        WHERE department_id = %s AND academic_year = %s
+        """,
+        (department_id, academic_year),
+    )
+    excel = cur.fetchone()
+
+    if not excel:
+        raise HTTPException(status_code=400, detail="no excel")
+
+    excel_template_id = excel[0]
 
     try:
-        out_path = generate_docx_for_teacher(
+        output_path = generate_docx_from_raw(
+            raw_template_id=raw_template_id,
             teacher_id=teacher_id,
-            department_id=department_id,
-            academic_year=academic_year,
+            excel_template_id=excel_template_id,
         )
 
-        hist_id = insert_generation_history(
-            generated_by_user_id=int(user.get("sub")),
-            generated_by_role=user.get("role"),
-            generated_for_teacher_id=teacher_id,
-            department_id=department_id,
-            academic_year=academic_year,
-            excel_template_id=excel_template_id_hist,
-            docx_template_id=docx_template_id_hist,
-            output_path=out_path,
-            status="success",
-            error_text=None
+        cur.execute(
+            """
+            INSERT INTO generation_history(
+                teacher_id,
+                department_id,
+                academic_year,
+                file_path,
+                status
+            )
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (
+                teacher_id,
+                department_id,
+                academic_year,
+                output_path,
+                "success",
+            ),
         )
+        conn.commit()
 
         return {
-            "status": "ok",
-            "history_id": hist_id,
-            "output_path": out_path,
-            "download_url": f"/generate/download?path={out_path}"
+            "download_url": f"/generate/download?path={output_path}"
         }
 
     except Exception as e:
-        hist_id = insert_generation_history(
-            generated_by_user_id=int(user.get("sub")),
-            generated_by_role=user.get("role"),
-            generated_for_teacher_id=teacher_id,
-            department_id=department_id,
-            academic_year=academic_year,
-            excel_template_id=excel_template_id_hist,
-            docx_template_id=docx_template_id_hist,
-            output_path=None,
-            status="error",
-            error_text=str(e)
+        conn.rollback()
+
+        cur.execute(
+            """
+            INSERT INTO generation_history(
+                teacher_id,
+                department_id,
+                academic_year,
+                file_path,
+                status,
+                error_text
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                teacher_id,
+                department_id,
+                academic_year,
+                "",
+                "error",
+                str(e),
+            ),
         )
-        raise HTTPException(status_code=400, detail=f"{str(e)} (history_id={hist_id})")
+        conn.commit()
+
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/download")
-def download_generated(path: str):
-    file_path = safe_resolve_in_dir(path, GENERATED_DIR)
-    return FileResponse(
-        str(file_path),
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=file_path.name
-    )
+def download(path: str):
+    return FileResponse(path, filename=path.split("/")[-1])
