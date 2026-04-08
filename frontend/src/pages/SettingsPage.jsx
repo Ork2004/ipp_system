@@ -1,26 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import { useNavigate } from "react-router-dom";
 
 export default function SettingsPage() {
-  const navigate = useNavigate();
+  const [departmentId] = useState(Number(localStorage.getItem("department_id") || 0));
+  const [academicYear, setAcademicYear] = useState(localStorage.getItem("academic_year") || "2025-2026");
 
-  const [departmentId, setDepartmentId] = useState(
-    Number(localStorage.getItem("department_id") || 0)
-  );
   const [excelTemplates, setExcelTemplates] = useState([]);
-  const [academicYear, setAcademicYear] = useState(
-    localStorage.getItem("academic_year") || "2025-2026"
-  );
   const [excelTemplateId, setExcelTemplateId] = useState("");
 
   const [cols, setCols] = useState([]);
-  const [settingsStatus, setSettingsStatus] = useState("");
-
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [blocksData, setBlocksData] = useState({ blocks: [], semester_map: {} });
-  const [blocksStatus, setBlocksStatus] = useState("");
-  const [rawTemplateInfo, setRawTemplateInfo] = useState(null);
+  const [tables, setTables] = useState([]);
+  const [status, setStatus] = useState("");
 
   const [cfg, setCfg] = useState({
     columns: {
@@ -45,33 +35,135 @@ export default function SettingsPage() {
         lab_practice: ["spz", "lz", "rk_1_2"],
       },
     },
+    template_bindings: {
+      teaching_load: {
+        staff: { sem1: {}, sem2: {} },
+        hourly: { sem1: {}, sem2: {} },
+      },
+    },
   });
 
-  const years = useMemo(() => {
-    const set = new Set(
-      (excelTemplates || []).map((t) => t.academic_year).filter(Boolean)
-    );
-    set.add(academicYear);
-    return Array.from(set).sort().reverse();
-  }, [excelTemplates, academicYear]);
-
   const excelForYear = useMemo(() => {
-    return (
-      (excelTemplates || []).find(
-        (t) => String(t.academic_year) === String(academicYear)
-      ) || null
-    );
+    return (excelTemplates || []).find((t) => String(t.academic_year) === String(academicYear)) || null;
   }, [excelTemplates, academicYear]);
 
-  const colOptions = useMemo(
-    () => (cols || []).map((c) => c.column_name),
-    [cols]
-  );
+  async function loadExcelTemplates() {
+    try {
+      const res = await api.get("/excel/templates", {
+        params: { department_id: departmentId },
+      });
+      setExcelTemplates(Array.isArray(res.data) ? res.data : []);
+    } catch (e) {
+      setStatus(e?.response?.data?.detail || "Ошибка загрузки Excel");
+    }
+  }
+
+  async function loadColumns(exId) {
+    try {
+      const res = await api.get(`/excel/${exId}/columns`);
+      setCols(Array.isArray(res.data) ? res.data : []);
+    } catch (e) {
+      setCols([]);
+      setStatus(e?.response?.data?.detail || "Ошибка загрузки колонок");
+    }
+  }
+
+  async function loadRawTables() {
+    try {
+      const res = await api.get("/raw-template/by-year", {
+        params: {
+          department_id: departmentId,
+          academic_year: academicYear,
+        },
+      });
+
+      const rawTemplateId = res.data?.id;
+      if (!rawTemplateId) {
+        setTables([]);
+        return;
+      }
+
+      localStorage.setItem("raw_template_id", String(rawTemplateId));
+
+      const t = await api.get(`/raw-template/${rawTemplateId}/tables`);
+      setTables(Array.isArray(t.data?.tables) ? t.data.tables : []);
+    } catch {
+      setTables([]);
+    }
+  }
+
+  async function loadSettings() {
+    try {
+      const res = await api.get("/settings/current", {
+        params: {
+          department_id: departmentId,
+          academic_year: academicYear,
+        },
+      });
+
+      if (res.data?.exists && res.data?.config) {
+        const loaded = res.data.config;
+
+        setCfg((prev) => ({
+          ...prev,
+          columns: {
+            ...prev.columns,
+            ...(loaded.columns || {}),
+          },
+          activity_types: {
+            ...prev.activity_types,
+            ...(loaded.activity_types || {}),
+          },
+          merge_rules: {
+            ...prev.merge_rules,
+            ...(loaded.merge_rules || {}),
+            sum_cols_by_type: {
+              ...prev.merge_rules.sum_cols_by_type,
+              ...(loaded.merge_rules?.sum_cols_by_type || {}),
+            },
+          },
+          template_bindings: {
+            teaching_load: {
+              staff: {
+                sem1: loaded.template_bindings?.teaching_load?.staff?.sem1 || {},
+                sem2: loaded.template_bindings?.teaching_load?.staff?.sem2 || {},
+              },
+              hourly: {
+                sem1: loaded.template_bindings?.teaching_load?.hourly?.sem1 || {},
+                sem2: loaded.template_bindings?.teaching_load?.hourly?.sem2 || {},
+              },
+            },
+          },
+        }));
+      }
+    } catch (e) {
+      setStatus(e?.response?.data?.detail || "Ошибка загрузки настроек");
+    }
+  }
+
+  async function saveSettings() {
+    try {
+      setStatus("Сохранение...");
+
+      await api.post("/settings/save", {
+        department_id: departmentId,
+        academic_year: academicYear,
+        config: cfg,
+      });
+
+      setStatus("Сохранено ✅");
+    } catch (e) {
+      setStatus(e?.response?.data?.detail || "Ошибка сохранения");
+    }
+  }
 
   function setCol(key, value) {
     setCfg((prev) => ({
       ...prev,
-      columns: { ...prev.columns, [key]: value },
+      columns: {
+        ...prev.columns,
+        [key]: value,
+      },
     }));
   }
 
@@ -93,285 +185,98 @@ export default function SettingsPage() {
   function setMergeRule(key, value) {
     setCfg((prev) => ({
       ...prev,
-      merge_rules: { ...(prev.merge_rules || {}), [key]: value },
+      merge_rules: {
+        ...prev.merge_rules,
+        [key]: value,
+      },
     }));
   }
 
-  function setMergeRuleArray(key, arr) {
-    setCfg((prev) => ({
-      ...prev,
-      merge_rules: { ...(prev.merge_rules || {}), [key]: arr },
-    }));
-  }
+  function setMergeRuleArray(key, text) {
+    const arr = String(text || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
-  function setSumColsByType(typeKey, arr) {
     setCfg((prev) => ({
       ...prev,
       merge_rules: {
-        ...(prev.merge_rules || {}),
+        ...prev.merge_rules,
+        [key]: arr,
+      },
+    }));
+  }
+
+  function setSumColsByType(typeKey, text) {
+    const arr = String(text || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    setCfg((prev) => ({
+      ...prev,
+      merge_rules: {
+        ...prev.merge_rules,
         sum_cols_by_type: {
-          ...((prev.merge_rules || {}).sum_cols_by_type || {}),
+          ...prev.merge_rules.sum_cols_by_type,
           [typeKey]: arr,
         },
       },
     }));
   }
 
-  async function loadExcelTemplates(depId = departmentId) {
-    if (!depId) {
-      setSettingsStatus("Нет department_id. Выйди и зайди заново.");
-      return;
-    }
-    try {
-      const res = await api.get("/excel/templates", {
-        params: { department_id: depId },
-      });
-      setExcelTemplates(res.data || []);
-    } catch (e) {
-      console.error(e);
-      setSettingsStatus(e?.response?.data?.detail || "Ошибка загрузки Excel");
-    }
-  }
-
-  async function loadColumns(exId) {
-    if (!exId) return;
-    try {
-      const res = await api.get(`/excel/${exId}/columns`);
-      setCols(res.data || []);
-    } catch (e) {
-      console.error(e);
-      setSettingsStatus("Ошибка загрузки колонок");
-    }
-  }
-
-  async function loadCurrentSettingsByYear(depId, year) {
-    if (!depId || !year) return;
-    try {
-      const res = await api.get("/settings/current", {
-        params: { department_id: depId, academic_year: year },
-      });
-
-      if (res.data?.exists) {
-        const loaded = res.data.config || {};
-        const c = loaded.columns || {};
-        const at = loaded.activity_types || {};
-        const mr = loaded.merge_rules || {};
-        const sct = mr.sum_cols_by_type || {};
-
-        setCfg({
-          columns: {
-            teacher_col: c.teacher_col || "",
-            staff_hours_col: c.staff_hours_col || "",
-            hourly_hours_col: c.hourly_hours_col || "",
-            discipline_col: c.discipline_col || "",
-            activity_type_col: c.activity_type_col || "",
-            group_col: c.group_col || "",
-            op_col: c.op_col || "",
+  function setTeachingLoadBinding(loadKind, semKey, tableId) {
+    setCfg((prev) => ({
+      ...prev,
+      template_bindings: {
+        teaching_load: {
+          ...prev.template_bindings.teaching_load,
+          [loadKind]: {
+            ...prev.template_bindings.teaching_load[loadKind],
+            [semKey]: tableId ? { raw_table_id: Number(tableId) } : {},
           },
-          activity_types: {
-            lecture: Array.isArray(at.lecture)
-              ? at.lecture
-              : ["лек", "лк", "lecture"],
-            lab_practice: Array.isArray(at.lab_practice)
-              ? at.lab_practice
-              : ["лаб", "пра", "lab", "pract"],
-          },
-          merge_rules: {
-            key_cols: Array.isArray(mr.key_cols)
-              ? mr.key_cols
-              : ["distsiplina", "op"],
-            group_join: mr.group_join || ", ",
-            group_priority_type: mr.group_priority_type || "lecture",
-            sum_cols_by_type: {
-              lecture: Array.isArray(sct.lecture)
-                ? sct.lecture
-                : ["l", "srsp", "ekzameny"],
-              lab_practice: Array.isArray(sct.lab_practice)
-                ? sct.lab_practice
-                : ["spz", "lz", "rk_1_2"],
-            },
-          },
-        });
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  async function loadBlocks(exId) {
-    if (!exId) {
-      setBlocksStatus("Нет Excel для этого года");
-      return;
-    }
-    try {
-      const res = await api.get("/blocks/available", {
-        params: { excel_template_id: exId },
-      });
-      setBlocksData(res.data || { blocks: [], semester_map: {} });
-      setBlocksStatus("");
-    } catch (e) {
-      console.error(e);
-      setBlocksStatus(e?.response?.data?.detail || "Ошибка загрузки blocks");
-    }
-  }
-
-  async function loadRawTemplateInfo(depId, year) {
-    if (!depId || !year) {
-      setRawTemplateInfo(null);
-      return;
-    }
-
-    try {
-      const res = await api.get("/raw-template/by-year", {
-        params: { department_id: depId, academic_year: year },
-      });
-      setRawTemplateInfo(res.data || null);
-      if (res.data?.id) {
-        localStorage.setItem("raw_template_id", String(res.data.id));
-      }
-    } catch (e) {
-      setRawTemplateInfo(null);
-    }
-  }
-
-  async function saveSettings() {
-    if (!departmentId) {
-      setSettingsStatus("Нет department_id. Выйди и зайди заново.");
-      return;
-    }
-    if (!academicYear) {
-      setSettingsStatus("Укажи год");
-      return;
-    }
-    if (!excelTemplateId) {
-      setSettingsStatus("Нет Excel для этого года");
-      return;
-    }
-
-    const c = cfg.columns || {};
-    if (!c.teacher_col || !c.staff_hours_col) {
-      setSettingsStatus(
-        "Обязательные: ФИО преподавателя и Штатные часы"
-      );
-      return;
-    }
-    if (!c.discipline_col || !c.activity_type_col || !c.group_col) {
-      setSettingsStatus(
-        "Обязательные: Дисциплина, Вид занятий, Группа"
-      );
-      return;
-    }
-
-    const mr = cfg.merge_rules || {};
-    const sct = mr.sum_cols_by_type || {};
-
-    if (!Array.isArray(mr.key_cols) || !mr.key_cols.length) {
-      setSettingsStatus(
-        "Расширенные: не задано, по каким колонкам объединять строки"
-      );
-      return;
-    }
-
-    const lectureArr = Array.isArray(sct.lecture) ? sct.lecture : [];
-    const labArr = Array.isArray(sct.lab_practice) ? sct.lab_practice : [];
-
-    if (!lectureArr.length && !labArr.length) {
-      setSettingsStatus("Расширенные: выбери колонки для суммирования");
-      return;
-    }
-
-    try {
-      setSettingsStatus("Сохранение...");
-      await api.post("/settings/save", {
-        department_id: Number(departmentId),
-        academic_year: academicYear,
-        config: cfg,
-      });
-      setSettingsStatus("Сохранено ✅");
-      await loadBlocks(excelTemplateId);
-    } catch (e) {
-      console.error(e);
-      setSettingsStatus(e?.response?.data?.detail || "Ошибка сохранения");
-    }
+        },
+      },
+    }));
   }
 
   useEffect(() => {
-    const dep = Number(localStorage.getItem("department_id") || 0);
-    setDepartmentId(dep);
-
-    const refreshAll = async () => {
-      const d = Number(localStorage.getItem("department_id") || 0);
-      if (!d) return;
-      await loadExcelTemplates(d);
-    };
-
-    refreshAll();
-
-    window.addEventListener("focus", refreshAll);
-    const onVis = () =>
-      document.visibilityState === "visible" && refreshAll();
-    document.addEventListener("visibilitychange", onVis);
-
-    return () => {
-      window.removeEventListener("focus", refreshAll);
-      document.removeEventListener("visibilitychange", onVis);
-    };
+    loadExcelTemplates();
   }, []);
 
   useEffect(() => {
-    const ex = excelForYear;
-    const id = ex ? String(ex.id) : "";
-    setExcelTemplateId(id);
-
-    if (ex) {
-      (async () => {
-        setSettingsStatus("");
-        await loadColumns(id);
-        await loadBlocks(id);
-        await loadCurrentSettingsByYear(departmentId, academicYear);
-        await loadRawTemplateInfo(departmentId, academicYear);
-      })();
-    } else {
+    if (!excelForYear) {
       setCols([]);
-      setBlocksData({ blocks: [], semester_map: {} });
-      setRawTemplateInfo(null);
-      setSettingsStatus("Нет Excel для этого года");
+      setTables([]);
+      return;
     }
-  }, [academicYear, excelTemplates]);
+
+    const id = excelForYear.id;
+    setExcelTemplateId(String(id));
+
+    loadColumns(id);
+    loadRawTables();
+    loadSettings();
+  }, [excelTemplates, academicYear]);
 
   return (
     <div className="container">
       <div className="page-title">Настройка генерации</div>
 
       <div className="card card-pad">
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            flexWrap: "wrap",
-            alignItems: "center",
-            marginBottom: 12,
-          }}
-        >
-          <select
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+          <input
             className="input"
             style={{ width: 220 }}
             value={academicYear}
             onChange={(e) => {
-              const y = e.target.value;
-              setAcademicYear(y);
-              localStorage.setItem("academic_year", y);
+              setAcademicYear(e.target.value);
+              localStorage.setItem("academic_year", e.target.value);
             }}
-          >
-            {years.length ? null : <option value={academicYear}>{academicYear}</option>}
-            {years.map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
-            ))}
-          </select>
+            placeholder="2025-2026"
+          />
 
-          <div className="small">{settingsStatus}</div>
+          <div className="small">{status}</div>
         </div>
 
         <div
@@ -385,75 +290,19 @@ export default function SettingsPage() {
           }}
         >
           <div style={{ fontWeight: 800, marginBottom: 8 }}>
-            Текущий сценарий работы
+            Что настраивается здесь
           </div>
 
           <div className="small" style={{ display: "grid", gap: 6 }}>
-            <div>1. Загрузить Excel с нагрузкой</div>
-            <div>2. Загрузить обычный DOCX шаблон</div>
-            <div>3. Настроить маппинг колонок</div>
-            <div>4. Заполнить ручные таблицы преподавателя</div>
-            <div>5. Сгенерировать готовый ИПП</div>
+            <div>1. Какие колонки Excel использовать для генерации</div>
+            <div>2. Какие таблицы шаблона относятся к штатной и почасовой нагрузке</div>
+            <div>3. Как система объединяет строки и считает часы</div>
           </div>
-        </div>
-
-        <div className="section-title" style={{ marginTop: 8 }}>
-          Проверка данных для года {academicYear}
-        </div>
-
-        <div
-          className="table-wrap"
-          style={{ marginTop: 10, marginBottom: 18 }}
-        >
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Элемент</th>
-                <th>Статус</th>
-                <th>Описание</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Excel</td>
-                <td style={{ fontWeight: 800 }}>
-                  {excelForYear ? "Готово" : "Нет"}
-                </td>
-                <td>
-                  {excelForYear
-                    ? excelForYear.source_filename || "Файл загружен"
-                    : "Сначала загрузите Excel"}
-                </td>
-              </tr>
-              <tr>
-                <td>Шаблон DOCX</td>
-                <td style={{ fontWeight: 800 }}>
-                  {rawTemplateInfo ? "Готово" : "Нет"}
-                </td>
-                <td>
-                  {rawTemplateInfo
-                    ? rawTemplateInfo.source_filename || "Шаблон загружен"
-                    : "Сначала загрузите raw шаблон"}
-                </td>
-              </tr>
-              <tr>
-                <td>Настройки генерации</td>
-                <td style={{ fontWeight: 800 }}>
-                  {cfg.columns.teacher_col && cfg.columns.staff_hours_col
-                    ? "Заполнены"
-                    : "Не заполнены"}
-                </td>
-                <td>Нужно сопоставить колонки Excel с полями системы</td>
-              </tr>
-            </tbody>
-          </table>
         </div>
 
         <div className="hr" />
 
-        <div className="section-title" style={{ marginTop: 14 }}>
-          Обязательный маппинг колонок
-        </div>
+        <div className="section-title">Маппинг Excel колонок</div>
 
         <SelectRow
           label="ФИО преподавателя"
@@ -500,115 +349,92 @@ export default function SettingsPage() {
 
         <div className="hr" />
 
-        <div className="section-title" style={{ marginTop: 14 }}>
-          Распознавание видов занятий
-        </div>
+        <div className="section-title">Типы занятий</div>
 
         <TextRow
           label="Лекции"
           value={(cfg.activity_types?.lecture || []).join(", ")}
           onChange={(v) => setActivityPatterns("lecture", v)}
-          placeholder="лек, лк, lecture"
         />
         <TextRow
           label="Лаб/практики"
           value={(cfg.activity_types?.lab_practice || []).join(", ")}
           onChange={(v) => setActivityPatterns("lab_practice", v)}
-          placeholder="лаб, пра, lab, pract"
         />
 
-        <div className="hr" style={{ marginTop: 18 }} />
+        <div className="hr" />
 
-        <button
-          className="btn btn-outline"
-          onClick={() => setAdvancedOpen((v) => !v)}
-          type="button"
-        >
-          {advancedOpen
-            ? "Скрыть расширенные настройки"
-            : "Расширенные настройки"}
-        </button>
+        <div className="section-title">Правила объединения</div>
 
-        {advancedOpen ? (
-          <div style={{ marginTop: 14 }}>
-            <CheckboxMultiSelect
-              label="По каким колонкам объединять строки"
-              options={colOptions}
-              value={cfg.merge_rules?.key_cols || []}
-              onChange={(arr) => setMergeRuleArray("key_cols", arr)}
-            />
+        <TextRow
+          label="Ключевые колонки"
+          value={(cfg.merge_rules?.key_cols || []).join(", ")}
+          onChange={(v) => setMergeRuleArray("key_cols", v)}
+        />
+        <TextRow
+          label="Разделитель групп"
+          value={cfg.merge_rules?.group_join || ", "}
+          onChange={(v) => setMergeRule("group_join", v)}
+        />
 
-            <div
-              style={{
-                display: "flex",
-                gap: 10,
-                alignItems: "center",
-                flexWrap: "wrap",
-                marginBottom: 10,
-              }}
-            >
-              <div style={{ width: 260, fontWeight: 700 }}>
-                Приоритет группы
-              </div>
-              <select
-                className="input"
-                style={{ width: 260 }}
-                value={cfg.merge_rules?.group_priority_type || "lecture"}
-                onChange={(e) =>
-                  setMergeRule("group_priority_type", e.target.value)
-                }
-              >
-                <option value="lecture">Лекции</option>
-                <option value="lab_practice">Лаб/практики</option>
-              </select>
-            </div>
+        <SelectSimple
+          label="Приоритет групп"
+          value={cfg.merge_rules?.group_priority_type || "lecture"}
+          options={[
+            { value: "lecture", label: "Лекции" },
+            { value: "lab_practice", label: "Лаб/практики" },
+          ]}
+          onChange={(v) => setMergeRule("group_priority_type", v)}
+        />
 
-            <CheckboxMultiSelect
-              label="Колонки суммирования для лекций"
-              options={colOptions}
-              value={cfg.merge_rules?.sum_cols_by_type?.lecture || []}
-              onChange={(arr) => setSumColsByType("lecture", arr)}
-            />
+        <TextRow
+          label="Сумма для лекций"
+          value={(cfg.merge_rules?.sum_cols_by_type?.lecture || []).join(", ")}
+          onChange={(v) => setSumColsByType("lecture", v)}
+        />
+        <TextRow
+          label="Сумма для лаб/практик"
+          value={(cfg.merge_rules?.sum_cols_by_type?.lab_practice || []).join(", ")}
+          onChange={(v) => setSumColsByType("lab_practice", v)}
+        />
 
-            <CheckboxMultiSelect
-              label="Колонки суммирования для лаб/практик"
-              options={colOptions}
-              value={cfg.merge_rules?.sum_cols_by_type?.lab_practice || []}
-              onChange={(arr) => setSumColsByType("lab_practice", arr)}
-            />
-          </div>
-        ) : null}
+        <div className="hr" />
 
-        <div className="actions-row" style={{ marginTop: 18 }}>
-          <button
-            className="btn btn-primary"
-            onClick={saveSettings}
-            disabled={!excelTemplateId}
-          >
+        <div className="section-title">Привязка таблиц нагрузки</div>
+
+        <TeachingLoadBinding
+          label="Штатная 1 семестр"
+          tables={tables}
+          value={cfg.template_bindings?.teaching_load?.staff?.sem1?.raw_table_id || ""}
+          onChange={(v) => setTeachingLoadBinding("staff", "sem1", v)}
+        />
+
+        <TeachingLoadBinding
+          label="Штатная 2 семестр"
+          tables={tables}
+          value={cfg.template_bindings?.teaching_load?.staff?.sem2?.raw_table_id || ""}
+          onChange={(v) => setTeachingLoadBinding("staff", "sem2", v)}
+        />
+
+        <TeachingLoadBinding
+          label="Почасовая 1 семестр"
+          tables={tables}
+          value={cfg.template_bindings?.teaching_load?.hourly?.sem1?.raw_table_id || ""}
+          onChange={(v) => setTeachingLoadBinding("hourly", "sem1", v)}
+        />
+
+        <TeachingLoadBinding
+          label="Почасовая 2 семестр"
+          tables={tables}
+          value={cfg.template_bindings?.teaching_load?.hourly?.sem2?.raw_table_id || ""}
+          onChange={(v) => setTeachingLoadBinding("hourly", "sem2", v)}
+        />
+
+        <div className="actions-row" style={{ marginTop: 20 }}>
+          <button className="btn btn-primary" onClick={saveSettings} disabled={!excelTemplateId}>
             СОХРАНИТЬ
           </button>
-
-          <button
-            className="btn btn-outline"
-            onClick={() => navigate("/manual-tables")}
-            disabled={!rawTemplateInfo}
-          >
-            ПЕРЕЙТИ К ТАБЛИЦАМ
-          </button>
         </div>
-
-        <div className="hr" style={{ marginTop: 18 }} />
-
-        <div className="section-title" style={{ marginTop: 14 }}>
-          Автоматически найденные блоки нагрузки
-        </div>
-
-        <div className="small" style={{ marginBottom: 10 }}>
-          {blocksStatus ||
-            "Система использует эти блоки для построения таблиц учебной нагрузки"}
-        </div>
-
-        <BlocksSection blocks={blocksData.blocks || []} />
       </div>
     </div>
   );
@@ -616,24 +442,12 @@ export default function SettingsPage() {
 
 function SelectRow({ label, value, cols, onChange }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: 10,
-        alignItems: "center",
-        flexWrap: "wrap",
-        marginBottom: 10,
-      }}
-    >
-      <div style={{ width: 260, fontWeight: 700 }}>{label}</div>
-      <select
-        className="input"
-        style={{ width: 680 }}
-        value={value || ""}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">—</option>
-        {cols.map((c) => (
+    <div style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ width: 220 }}>{label}</div>
+
+      <select className="input" style={{ width: 420 }} value={value || ""} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Выбери колонку</option>
+        {(cols || []).map((c) => (
           <option key={c.column_name} value={c.column_name}>
             {c.header_text}
           </option>
@@ -643,132 +457,50 @@ function SelectRow({ label, value, cols, onChange }) {
   );
 }
 
-function TextRow({ label, value, onChange, placeholder }) {
+function TextRow({ label, value, onChange }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: 10,
-        alignItems: "center",
-        flexWrap: "wrap",
-        marginBottom: 10,
-      }}
-    >
-      <div style={{ width: 260, fontWeight: 700 }}>{label}</div>
+    <div style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ width: 220 }}>{label}</div>
+
       <input
         className="input"
-        style={{ width: 680 }}
+        style={{ width: 420 }}
         value={value || ""}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
       />
     </div>
   );
 }
 
-function CheckboxMultiSelect({ label, options, value, onChange }) {
-  const set = useMemo(() => new Set(value || []), [value]);
-
-  function toggle(opt) {
-    const next = new Set(set);
-    if (next.has(opt)) next.delete(opt);
-    else next.add(opt);
-    onChange(Array.from(next));
-  }
-
+function SelectSimple({ label, value, options, onChange }) {
   return (
-    <div style={{ marginBottom: 12 }}>
-      <div style={{ fontWeight: 700, marginBottom: 8 }}>{label}</div>
+    <div style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ width: 220 }}>{label}</div>
 
-      <div
-        className="card"
-        style={{
-          borderRadius: 12,
-          padding: 10,
-          border: "1px solid rgba(15,23,42,.10)",
-          maxHeight: 220,
-          overflow: "auto",
-          background: "#fff",
-        }}
-      >
-        {!options.length ? (
-          <div className="small">Нет колонок</div>
-        ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-              gap: 8,
-            }}
-          >
-            {options.map((opt) => (
-              <label
-                key={opt}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "8px 10px",
-                  borderRadius: 10,
-                  border: "1px solid rgba(15,23,42,.08)",
-                  background: set.has(opt)
-                    ? "rgba(47,107,255,.08)"
-                    : "transparent",
-                  cursor: "pointer",
-                  userSelect: "none",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={set.has(opt)}
-                  onChange={() => toggle(opt)}
-                  style={{ transform: "scale(1.05)" }}
-                />
-                <span
-                  style={{
-                    fontFamily:
-                      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-                    fontSize: 13,
-                  }}
-                >
-                  {opt}
-                </span>
-              </label>
-            ))}
-          </div>
-        )}
-      </div>
+      <select className="input" style={{ width: 420 }} value={value || ""} onChange={(e) => onChange(e.target.value)}>
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
 
-function BlocksSection({ blocks }) {
+function TeachingLoadBinding({ label, tables, value, onChange }) {
   return (
-    <div className="table-wrap">
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Block</th>
-            <th>Описание</th>
-            <th>Тип</th>
-          </tr>
-        </thead>
-        <tbody>
-          {!blocks.length ? (
-            <tr>
-              <td colSpan="3">Нет найденных блоков</td>
-            </tr>
-          ) : (
-            blocks.map((b) => (
-              <tr key={b.key}>
-                <td style={{ fontWeight: 800 }}>{b.key}</td>
-                <td>{b.title || ""}</td>
-                <td>{b.type || "loop"}</td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+    <div style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ width: 220 }}>{label}</div>
+
+      <select className="input" style={{ width: 420 }} value={value || ""} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Выбери таблицу</option>
+        {(tables || []).map((t) => (
+          <option key={t.id} value={t.id}>
+            Таблица {Number(t.table_index) + 1}{t.section_title ? ` — ${t.section_title}` : ""}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

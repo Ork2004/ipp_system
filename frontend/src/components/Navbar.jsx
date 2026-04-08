@@ -35,6 +35,9 @@ export default function Navbar() {
                   <NavLink to="/excel-upload" className={linkClass}>
                     Нагрузка
                   </NavLink>
+                  <NavLink to="/workload-data" className={linkClass}>
+                    Данные
+                  </NavLink>
                   <NavLink to="/raw-template-upload" className={linkClass}>
                     Шаблон
                   </NavLink>
@@ -43,9 +46,6 @@ export default function Navbar() {
                   </NavLink>
                   <NavLink to="/manual-tables" className={linkClass}>
                     Таблицы
-                  </NavLink>
-                  <NavLink to="/workload-data" className={linkClass}>
-                    Данные
                   </NavLink>
                 </>
               ) : null}
