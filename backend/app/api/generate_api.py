@@ -2,9 +2,9 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import FileResponse
 
 from backend.app.config import GENERATED_DIR
-from backend.app.utils.generator import generate_docx_for_teacher
 from backend.app.database import get_connection
 from backend.app.api.auth_api import get_current_user
+from backend.app.utils.generator import generate_docx_for_teacher
 from backend.app.utils.generation_history import insert_generation_history
 from backend.app.utils.storage import safe_resolve_in_dir
 
@@ -31,37 +31,50 @@ def _check_admin_teacher_in_department(admin_user: dict, teacher_id: int):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT department_id FROM teachers WHERE id=%s;", (teacher_id,))
+            cur.execute(
+                """
+                SELECT department_id
+                FROM teachers
+                WHERE id=%s;
+                """,
+                (teacher_id,),
+            )
             r = cur.fetchone()
             if not r:
                 raise HTTPException(status_code=404, detail="Преподаватель не найден")
-            if r[0] != dep:
+            if int(r[0]) != int(dep):
                 raise HTTPException(status_code=403, detail="Нельзя генерировать для другой кафедры")
     finally:
         conn.close()
 
 
-def _get_excel_docx_ids_for_history(department_id: int, academic_year: str):
+def _get_excel_and_raw_ids_for_history(department_id: int, academic_year: str):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT id
                 FROM excel_templates
                 WHERE department_id=%s AND academic_year=%s;
-            """, (department_id, academic_year))
+                """,
+                (department_id, academic_year),
+            )
             ex = cur.fetchone()
             excel_id = ex[0] if ex else None
 
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT id
-                FROM docx_templates
+                FROM raw_docx_templates
                 WHERE department_id=%s AND academic_year=%s;
-            """, (department_id, academic_year))
-            dx = cur.fetchone()
-            docx_id = dx[0] if dx else None
+                """,
+                (department_id, academic_year),
+            )
+            raw = cur.fetchone()
+            raw_id = raw[0] if raw else None
 
-            return excel_id, docx_id
+            return excel_id, raw_id
     finally:
         conn.close()
 
@@ -82,12 +95,16 @@ def generate_for_teacher(payload: dict, user=Depends(get_current_user)):
     academic_year = str(academic_year)
 
     _check_teacher_access(user, teacher_id)
+
     if user.get("role") == "admin":
         _check_admin_teacher_in_department(user, teacher_id)
-        if user.get("department_id") and department_id != user.get("department_id"):
+        if user.get("department_id") and int(department_id) != int(user.get("department_id")):
             raise HTTPException(status_code=403, detail="department_id должен совпадать с кафедрой админа")
 
-    excel_template_id_hist, docx_template_id_hist = _get_excel_docx_ids_for_history(department_id, academic_year)
+    excel_template_id_hist, raw_template_id_hist = _get_excel_and_raw_ids_for_history(
+        department_id,
+        academic_year,
+    )
 
     try:
         out_path = generate_docx_for_teacher(
@@ -103,17 +120,19 @@ def generate_for_teacher(payload: dict, user=Depends(get_current_user)):
             department_id=department_id,
             academic_year=academic_year,
             excel_template_id=excel_template_id_hist,
-            docx_template_id=docx_template_id_hist,
+            docx_template_id=None,
             output_path=out_path,
             status="success",
-            error_text=None
+            error_text=None,
         )
 
         return {
             "status": "ok",
             "history_id": hist_id,
             "output_path": out_path,
-            "download_url": f"/generate/download?path={out_path}"
+            "download_url": f"/generate/download?path={out_path}",
+            "raw_template_id": raw_template_id_hist,
+            "excel_template_id": excel_template_id_hist,
         }
 
     except Exception as e:
@@ -124,10 +143,10 @@ def generate_for_teacher(payload: dict, user=Depends(get_current_user)):
             department_id=department_id,
             academic_year=academic_year,
             excel_template_id=excel_template_id_hist,
-            docx_template_id=docx_template_id_hist,
+            docx_template_id=None,
             output_path=None,
             status="error",
-            error_text=str(e)
+            error_text=str(e),
         )
         raise HTTPException(status_code=400, detail=f"{str(e)} (history_id={hist_id})")
 
@@ -138,5 +157,5 @@ def download_generated(path: str):
     return FileResponse(
         str(file_path),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=file_path.name
+        filename=file_path.name,
     )

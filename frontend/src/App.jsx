@@ -4,9 +4,10 @@ import Navbar from "./components/Navbar";
 import LoginPage from "./pages/LoginPage";
 import ExcelUploadPage from "./pages/ExcelUploadPage";
 import WorkloadDataPage from "./pages/WorkloadDataPage";
-import DocxUploadPage from "./pages/DocxUploadPage";
 import SettingsPage from "./pages/SettingsPage";
 import GeneratePage from "./pages/GeneratePage";
+import RawTemplateUploadPage from "./pages/RawTemplateUploadPage";
+import ManualTablesPage from "./pages/ManualTablesPage";
 
 function RequireAuth({ children }) {
   const token = localStorage.getItem("token");
@@ -61,19 +62,28 @@ export default function App() {
         />
 
         <Route
-          path="/docx-upload"
+          path="/settings"
           element={
             <RequireAdmin>
-              <DocxUploadPage />
+              <SettingsPage />
             </RequireAdmin>
           }
         />
 
         <Route
-          path="/settings"
+          path="/raw-template-upload"
           element={
             <RequireAdmin>
-              <SettingsPage />
+              <RawTemplateUploadPage />
+            </RequireAdmin>
+          }
+        />
+
+        <Route
+          path="/manual-tables"
+          element={
+            <RequireAdmin>
+              <ManualTablesPage />
             </RequireAdmin>
           }
         />
