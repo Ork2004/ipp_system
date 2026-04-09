@@ -21,12 +21,24 @@ function downloadBlob(blob, filename) {
   window.URL.revokeObjectURL(url);
 }
 
+function getAutoAcademicYear() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  return month >= 8 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
+}
+
+function normalizeAcademicYear(value) {
+  const clean = String(value || "").trim();
+  return clean || getAutoAcademicYear();
+}
+
 export default function RawTemplateUploadPage() {
   const [departmentId, setDepartmentId] = useState(
     Number(localStorage.getItem("department_id") || 0)
   );
   const [academicYear, setAcademicYear] = useState(
-    localStorage.getItem("academic_year") || "2025-2026"
+    normalizeAcademicYear(localStorage.getItem("academic_year"))
   );
 
   const [templates, setTemplates] = useState([]);
@@ -46,11 +58,19 @@ export default function RawTemplateUploadPage() {
 
   useEffect(() => {
     const dep = Number(localStorage.getItem("department_id") || 0);
+    const year = normalizeAcademicYear(localStorage.getItem("academic_year"));
+
     setDepartmentId(dep);
+    setAcademicYear(year);
+    localStorage.setItem("academic_year", year);
+
     if (dep) loadTemplates(dep);
 
     const refresh = () => {
       const d = Number(localStorage.getItem("department_id") || 0);
+      const y = normalizeAcademicYear(localStorage.getItem("academic_year"));
+      setAcademicYear(y);
+      localStorage.setItem("academic_year", y);
       if (d) loadTemplates(d);
     };
 
@@ -85,12 +105,20 @@ export default function RawTemplateUploadPage() {
     }
   }
 
+  function handleYearChange(value) {
+    const year = normalizeAcademicYear(value);
+    setAcademicYear(year);
+    localStorage.setItem("academic_year", year);
+  }
+
   async function handleUpload() {
+    const year = normalizeAcademicYear(academicYear);
+
     if (!departmentId) {
       setStatus("Нет department_id. Выйди и зайди заново.");
       return;
     }
-    if (!academicYear) {
+    if (!year) {
       setStatus("Укажи год");
       return;
     }
@@ -109,19 +137,18 @@ export default function RawTemplateUploadPage() {
 
       const form = new FormData();
       form.append("department_id", String(departmentId));
-      form.append("academic_year", academicYear);
+      form.append("academic_year", year);
       form.append("file", file);
 
       const res = await api.post("/raw-template/upload", form, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
-      localStorage.setItem("academic_year", academicYear);
+      setAcademicYear(year);
+      localStorage.setItem("academic_year", year);
+
       if (res.data?.raw_template_id) {
-        localStorage.setItem(
-          "raw_template_id",
-          String(res.data.raw_template_id)
-        );
+        localStorage.setItem("raw_template_id", String(res.data.raw_template_id));
       }
 
       setFile(null);
@@ -253,13 +280,15 @@ export default function RawTemplateUploadPage() {
               border: "1px solid #d9e3f5",
               background: "#f8fbff",
               boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
+              color: "#17356f",
+              WebkitTextFillColor: "#17356f",
+              fontWeight: 600,
+              opacity: 1,
+              caretColor: "#17356f",
             }}
             value={academicYear}
-            onChange={(e) => {
-              const y = e.target.value;
-              setAcademicYear(y);
-              localStorage.setItem("academic_year", y);
-            }}
+            onChange={(e) => handleYearChange(e.target.value)}
+            onBlur={(e) => handleYearChange(e.target.value)}
             placeholder="2025-2026"
           />
 
@@ -386,7 +415,7 @@ export default function RawTemplateUploadPage() {
         <div
           className="table-wrap"
           style={{
-            overflowX: "auto",
+            overflowX: "hidden",
             borderRadius: 20,
             border: "1px solid #e4ebf7",
             background: "#fff",
@@ -395,7 +424,8 @@ export default function RawTemplateUploadPage() {
           <table
             className="table"
             style={{
-              minWidth: 1180,
+              width: "100%",
+              tableLayout: "fixed",
               margin: 0,
             }}
           >
@@ -403,68 +433,79 @@ export default function RawTemplateUploadPage() {
               <tr>
                 <th
                   style={{
-                    width: 160,
+                    width: "12%",
                     background: "#f7faff",
                     color: "#5f7195",
                     fontWeight: 800,
                     fontSize: 14,
-                    padding: "18px 16px",
+                    padding: "18px 12px",
+                    whiteSpace: "normal",
+                    wordBreak: "break-word",
                   }}
                 >
                   Учебный год
                 </th>
                 <th
                   style={{
+                    width: "20%",
                     background: "#f7faff",
                     color: "#5f7195",
                     fontWeight: 800,
                     fontSize: 14,
-                    padding: "18px 16px",
+                    padding: "18px 12px",
+                    whiteSpace: "normal",
+                    wordBreak: "break-word",
                   }}
                 >
                   Файл
                 </th>
                 <th
                   style={{
-                    width: 110,
+                    width: "8%",
                     background: "#f7faff",
                     color: "#5f7195",
                     fontWeight: 800,
                     fontSize: 14,
-                    padding: "18px 16px",
+                    padding: "18px 12px",
+                    whiteSpace: "normal",
+                    wordBreak: "break-word",
                   }}
                 >
                   Таблиц
                 </th>
                 <th
                   style={{
-                    width: 140,
+                    width: "10%",
                     background: "#f7faff",
                     color: "#5f7195",
                     fontWeight: 800,
                     fontSize: 14,
-                    padding: "18px 16px",
+                    padding: "18px 12px",
+                    whiteSpace: "normal",
+                    wordBreak: "break-word",
                   }}
                 >
                   Статус
                 </th>
                 <th
                   style={{
-                    width: 220,
+                    width: "15%",
                     background: "#f7faff",
                     color: "#5f7195",
                     fontWeight: 800,
                     fontSize: 14,
-                    padding: "18px 16px",
+                    padding: "18px 12px",
+                    whiteSpace: "normal",
+                    wordBreak: "break-word",
                   }}
                 >
                   Загружен
                 </th>
                 <th
                   style={{
-                    width: 420,
+                    width: "35%",
                     background: "#f7faff",
-                    padding: "18px 16px",
+                    padding: "18px 12px",
                   }}
                 />
               </tr>
@@ -490,9 +531,12 @@ export default function RawTemplateUploadPage() {
                   <tr key={t.id}>
                     <td
                       style={{
-                        padding: "18px 16px",
+                        padding: "18px 12px",
                         fontWeight: 600,
                         color: "#17356f",
+                        whiteSpace: "normal",
+                        wordBreak: "break-word",
+                        verticalAlign: "top",
                       }}
                     >
                       {t.academic_year}
@@ -500,9 +544,12 @@ export default function RawTemplateUploadPage() {
 
                     <td
                       style={{
-                        padding: "18px 16px",
+                        padding: "18px 12px",
                         color: "#1f2f4d",
                         fontWeight: 500,
+                        whiteSpace: "normal",
+                        wordBreak: "break-word",
+                        verticalAlign: "top",
                       }}
                     >
                       {t.source_filename || "template.docx"}
@@ -510,9 +557,12 @@ export default function RawTemplateUploadPage() {
 
                     <td
                       style={{
-                        padding: "18px 16px",
+                        padding: "18px 12px",
                         color: "#556987",
                         fontWeight: 600,
+                        whiteSpace: "normal",
+                        wordBreak: "break-word",
+                        verticalAlign: "top",
                       }}
                     >
                       {t.tables_count ?? 0}
@@ -520,8 +570,11 @@ export default function RawTemplateUploadPage() {
 
                     <td
                       style={{
-                        padding: "18px 16px",
+                        padding: "18px 12px",
                         color: "#556987",
+                        whiteSpace: "normal",
+                        wordBreak: "break-word",
+                        verticalAlign: "top",
                       }}
                     >
                       {t.status || ""}
@@ -529,8 +582,11 @@ export default function RawTemplateUploadPage() {
 
                     <td
                       style={{
-                        padding: "18px 16px",
+                        padding: "18px 12px",
                         color: "#556987",
+                        whiteSpace: "normal",
+                        wordBreak: "break-word",
+                        verticalAlign: "top",
                       }}
                     >
                       {fmtDateTime(t.created_at)}
@@ -538,15 +594,16 @@ export default function RawTemplateUploadPage() {
 
                     <td
                       style={{
-                        padding: "14px 16px",
+                        padding: "14px 12px",
+                        verticalAlign: "top",
                       }}
                     >
                       <div
                         style={{
                           display: "flex",
-                          gap: 10,
-                          justifyContent: "flex-end",
+                          gap: 8,
                           flexWrap: "wrap",
+                          justifyContent: "flex-start",
                         }}
                       >
                         <button
@@ -554,14 +611,14 @@ export default function RawTemplateUploadPage() {
                           onClick={() => openTables(t.academic_year)}
                           style={{
                             borderRadius: 12,
-                            minWidth: 160,
-                            height: 42,
+                            minWidth: 120,
+                            height: 40,
                             fontWeight: 700,
                             border: "1px solid #d6e2fb",
                             background: "#fff",
                           }}
                         >
-                          Открыть таблицы
+                          Открыть
                         </button>
 
                         <button
@@ -571,8 +628,8 @@ export default function RawTemplateUploadPage() {
                           }
                           style={{
                             borderRadius: 12,
-                            minWidth: 110,
-                            height: 42,
+                            minWidth: 105,
+                            height: 40,
                             fontWeight: 700,
                             border: "1px solid #d6e2fb",
                             background: "#fff",
@@ -586,8 +643,8 @@ export default function RawTemplateUploadPage() {
                           onClick={() => deleteByYear(t.academic_year)}
                           style={{
                             borderRadius: 12,
-                            minWidth: 110,
-                            height: 42,
+                            minWidth: 100,
+                            height: 40,
                             fontWeight: 700,
                             boxShadow: "none",
                           }}
