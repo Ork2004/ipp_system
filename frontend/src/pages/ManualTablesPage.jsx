@@ -1,794 +1,572 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 
-export default function ManualTablesPage() {
-  const role = localStorage.getItem("role") || "guest";
+export default function SettingsPage() {
+  const [departmentId] = useState(
+    Number(localStorage.getItem("department_id") || 0)
+  );
+  const [academicYear, setAcademicYear] = useState(
+    localStorage.getItem("academic_year") || "2025-2026"
+  );
 
-  const [departmentId] = useState(Number(localStorage.getItem("department_id") || 0));
-  const [academicYear, setAcademicYear] = useState(localStorage.getItem("academic_year") || "2025-2026");
-  const [rawTemplateId, setRawTemplateId] = useState(Number(localStorage.getItem("raw_template_id") || 0));
-  const [teacherId, setTeacherId] = useState(Number(localStorage.getItem("teacher_id") || 0));
+  const [excelTemplates, setExcelTemplates] = useState([]);
+  const [excelTemplateId, setExcelTemplateId] = useState("");
 
-  const [teachers, setTeachers] = useState([]);
+  const [cols, setCols] = useState([]);
   const [tables, setTables] = useState([]);
   const [status, setStatus] = useState("");
-  const [loading, setLoading] = useState(false);
 
-  const [savingStatic, setSavingStatic] = useState(false);
-  const [openTableIds, setOpenTableIds] = useState({});
-  const [formValues, setFormValues] = useState({});
-  const [loopValues, setLoopValues] = useState({});
-  const [savingLoopRowId, setSavingLoopRowId] = useState(0);
-  const [addingLoopTableId, setAddingLoopTableId] = useState(0);
-  const [deletingLoopRowId, setDeletingLoopRowId] = useState(0);
+  const [cfg, setCfg] = useState({
+    columns: {
+      teacher_col: "",
+      staff_hours_col: "",
+      hourly_hours_col: "",
+      discipline_col: "",
+      activity_type_col: "",
+      group_col: "",
+      op_col: "",
+    },
+    activity_types: {
+      lecture: ["лек", "лк", "lecture"],
+      lab_practice: ["лаб", "пра", "lab", "pract"],
+    },
+    merge_rules: {
+      key_cols: ["distsiplina", "op"],
+      group_join: ", ",
+      group_priority_type: "lecture",
+      sum_cols_by_type: {
+        lecture: ["l", "srsp", "ekzameny"],
+        lab_practice: ["spz", "lz", "rk_1_2"],
+      },
+    },
+    template_bindings: {
+      teaching_load: {
+        staff: {},
+        hourly: {},
+      },
+    },
+  });
 
-  const groupedSections = useMemo(() => {
-    const map = new Map();
+  const excelForYear = useMemo(() => {
+    return (
+      excelTemplates.find(
+        (t) => String(t.academic_year) === String(academicYear)
+      ) || null
+    );
+  }, [excelTemplates, academicYear]);
 
-    for (const table of tables) {
-      const key = table.section_title || `Раздел ${table.table_index + 1}`;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(table);
-    }
-
-    return Array.from(map.entries()).map(([sectionTitle, items]) => ({
-      sectionTitle,
-      items,
-    }));
-  }, [tables]);
-
-  async function loadTeachers() {
-    if (role !== "admin" || !departmentId) return;
-
+  async function loadExcelTemplates() {
     try {
-      const res = await api.get("/teachers", {
+      const res = await api.get("/excel/templates", {
         params: { department_id: departmentId },
       });
-      const list = Array.isArray(res.data) ? res.data : [];
-      setTeachers(list);
-
-      if (!teacherId && list.length) {
-        const firstId = Number(list[0].id);
-        setTeacherId(firstId);
-        localStorage.setItem("teacher_id", String(firstId));
-      }
-    } catch (e) {
-      console.error(e);
+      setExcelTemplates(res.data || []);
+    } catch {
+      setStatus("Ошибка загрузки Excel");
     }
   }
 
-  async function resolveRawTemplateIdByYear(year) {
-    if (!departmentId || !year) return 0;
-
-    const res = await api.get("/raw-template/by-year", {
-      params: {
-        department_id: departmentId,
-        academic_year: year,
-      },
-    });
-
-    const id = Number(res.data?.id || 0);
-    if (id) {
-      localStorage.setItem("raw_template_id", String(id));
-      setRawTemplateId(id);
+  async function loadColumns(exId) {
+    try {
+      const res = await api.get(`/excel/${exId}/columns`);
+      setCols(res.data || []);
+    } catch {
+      setCols([]);
     }
-    return id;
   }
 
-  function buildInitialStateFromTables(list) {
-    const nextFormValues = {};
-    const nextLoopValues = {};
-
-    for (const table of list) {
-      if (table.table_type === "static") {
-        for (const item of table.editable_values || []) {
-          nextFormValues[item.raw_cell_id] = item.value ?? "";
-        }
-      }
-
-      if (table.table_type === "loop") {
-        for (const row of table.loop_rows || []) {
-          nextLoopValues[row.loop_row_id] = {};
-          for (const v of row.values || []) {
-            nextLoopValues[row.loop_row_id][v.col_index] = v.value ?? "";
-          }
-        }
-      }
-    }
-
-    setFormValues(nextFormValues);
-    setLoopValues(nextLoopValues);
-  }
-
-  function mergeOpenState(list) {
-    setOpenTableIds((prev) => {
-      const next = {};
-      list.forEach((t, idx) => {
-        if (Object.prototype.hasOwnProperty.call(prev, t.id)) {
-          next[t.id] = prev[t.id];
-        } else {
-          next[t.id] = idx < 2;
-        }
+  async function loadRawTables() {
+    try {
+      const res = await api.get("/raw-template/by-year", {
+        params: { department_id: departmentId, academic_year: academicYear },
       });
-      return next;
-    });
-  }
 
-  async function loadForm(templateId, currentTeacherId) {
-    if (!templateId) {
-      setTables([]);
-      setStatus("Шаблон не найден");
-      return;
-    }
-
-    if (role === "admin" && !currentTeacherId) {
-      setTables([]);
-      setStatus("Выберите преподавателя");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const params = {
-        raw_template_id: templateId,
-      };
-
-      if (role === "admin") {
-        params.teacher_id = currentTeacherId;
-      }
-
-      const res = await api.get("/manual-fill/form", { params });
-      const list = Array.isArray(res.data?.tables) ? res.data.tables : [];
-
-      setTables(list);
-      buildInitialStateFromTables(list);
-      mergeOpenState(list);
-
-      setStatus("");
-    } catch (e) {
-      console.error(e);
-      setStatus(e?.response?.data?.detail || "Ошибка загрузки таблиц");
-      setTables([]);
-      setFormValues({});
-      setLoopValues({});
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function reloadCurrent() {
-    try {
-      setStatus("Загрузка...");
-      let id = Number(localStorage.getItem("raw_template_id") || 0);
-
+      const id = res.data?.id;
       if (!id) {
-        id = await resolveRawTemplateIdByYear(academicYear);
-      }
-
-      if (!id) {
-        setStatus("Шаблон для этого года не найден");
         setTables([]);
         return;
       }
 
-      setRawTemplateId(id);
-      await loadForm(id, teacherId);
-    } catch (e) {
-      console.error(e);
-      setStatus(e?.response?.data?.detail || "Ошибка загрузки");
+      const t = await api.get(`/raw-template/${id}/tables`);
+      setTables(t.data?.tables || []);
+    } catch {
       setTables([]);
     }
   }
 
-  useEffect(() => {
-    loadTeachers();
-  }, []);
-
-  useEffect(() => {
-    reloadCurrent();
-
-    const refresh = () => {
-      setAcademicYear(localStorage.getItem("academic_year") || "2025-2026");
-      setRawTemplateId(Number(localStorage.getItem("raw_template_id") || 0));
-      setTeacherId(Number(localStorage.getItem("teacher_id") || 0));
-      reloadCurrent();
-    };
-
-    window.addEventListener("focus", refresh);
-    const onVis = () => document.visibilityState === "visible" && refresh();
-    document.addEventListener("visibilitychange", onVis);
-
-    return () => {
-      window.removeEventListener("focus", refresh);
-      document.removeEventListener("visibilitychange", onVis);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (role === "admin" && teacherId && rawTemplateId) {
-      loadForm(rawTemplateId, teacherId);
-    }
-  }, [teacherId]);
-
-  async function handleChangeYear(nextYear) {
-    setAcademicYear(nextYear);
-    localStorage.setItem("academic_year", nextYear);
-    localStorage.removeItem("raw_template_id");
-    setRawTemplateId(0);
-    setOpenTableIds({});
-
+  async function loadSettings() {
     try {
-      setStatus("Поиск шаблона...");
-      const id = await resolveRawTemplateIdByYear(nextYear);
-      if (!id) {
-        setTables([]);
-        setStatus("Шаблон для этого года не найден");
-        return;
+      const res = await api.get("/settings/current", {
+        params: { department_id: departmentId, academic_year: academicYear },
+      });
+
+      if (res.data?.config) {
+        const loaded = res.data.config;
+        setCfg((prev) => ({
+          ...prev,
+          ...loaded,
+        }));
       }
-      await loadForm(id, teacherId);
-    } catch (e) {
-      console.error(e);
-      setStatus(e?.response?.data?.detail || "Ошибка переключения года");
-    }
+    } catch {}
   }
 
-  function toggleOpen(tableId) {
-    setOpenTableIds((prev) => ({
-      ...prev,
-      [tableId]: !prev[tableId],
-    }));
-  }
-
-  function setStaticValue(rawCellId, value) {
-    setFormValues((prev) => ({
-      ...prev,
-      [rawCellId]: value,
-    }));
-  }
-
-  async function saveStaticTable(table) {
+  async function saveSettings() {
     try {
-      setSavingStatic(true);
       setStatus("Сохранение...");
-
-      const values = (table.editable_values || []).map((item) => ({
-        raw_cell_id: item.raw_cell_id,
-        value: formValues[item.raw_cell_id] ?? "",
-      }));
-
-      await api.post("/manual-fill/save-static", {
-        raw_template_id: rawTemplateId,
-        teacher_id: role === "admin" ? teacherId : undefined,
-        values,
+      await api.post("/settings/save", {
+        department_id: departmentId,
+        academic_year: academicYear,
+        config: cfg,
       });
-
       setStatus("Сохранено ✅");
-      await loadForm(rawTemplateId, teacherId);
-    } catch (e) {
-      console.error(e);
-      setStatus(e?.response?.data?.detail || "Ошибка сохранения");
-    } finally {
-      setSavingStatic(false);
+    } catch {
+      setStatus("Ошибка сохранения");
     }
   }
 
-  function getLoopRowValue(loopRowId, colIndex) {
-    return loopValues?.[loopRowId]?.[colIndex] ?? "";
-  }
-
-  function setLoopRowValue(loopRowId, colIndex, value) {
-    setLoopValues((prev) => ({
+  function setCol(key, value) {
+    setCfg((prev) => ({
       ...prev,
-      [loopRowId]: {
-        ...(prev[loopRowId] || {}),
-        [colIndex]: value,
+      columns: {
+        ...prev.columns,
+        [key]: value,
       },
     }));
   }
 
-  async function addLoopRow(table) {
-    try {
-      setAddingLoopTableId(table.id);
-      setStatus("Добавление строки...");
+  function setActivityPatterns(typeKey, text) {
+    const arr = text
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
-      await api.post("/manual-fill/add-loop-row", {
-        raw_template_id: rawTemplateId,
-        raw_table_id: table.id,
-        teacher_id: role === "admin" ? teacherId : undefined,
-      });
-
-      await loadForm(rawTemplateId, teacherId);
-      setStatus("Строка добавлена ✅");
-    } catch (e) {
-      console.error(e);
-      setStatus(e?.response?.data?.detail || "Ошибка добавления строки");
-    } finally {
-      setAddingLoopTableId(0);
-    }
+    setCfg((prev) => ({
+      ...prev,
+      activity_types: {
+        ...prev.activity_types,
+        [typeKey]: arr,
+      },
+    }));
   }
 
-  async function saveLoopRow(loopRowId, table) {
-    try {
-      setSavingLoopRowId(loopRowId);
-      setStatus("Сохранение строки...");
+  function setMergeRuleArray(key, text) {
+    const arr = text
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
-      const values = [];
-      for (let i = 0; i < Number(table.col_count || 0); i += 1) {
-        values.push({
-          col_index: i,
-          value: getLoopRowValue(loopRowId, i),
-        });
-      }
-
-      await api.post("/manual-fill/save-loop-row", {
-        teacher_id: role === "admin" ? teacherId : undefined,
-        loop_row_id: loopRowId,
-        values,
-      });
-
-      setStatus("Строка сохранена ✅");
-      await loadForm(rawTemplateId, teacherId);
-    } catch (e) {
-      console.error(e);
-      setStatus(e?.response?.data?.detail || "Ошибка сохранения строки");
-    } finally {
-      setSavingLoopRowId(0);
-    }
+    setCfg((prev) => ({
+      ...prev,
+      merge_rules: {
+        ...prev.merge_rules,
+        [key]: arr,
+      },
+    }));
   }
 
-  async function deleteLoopRow(loopRowId) {
-    const ok = window.confirm("Удалить эту строку?");
-    if (!ok) return;
-
-    try {
-      setDeletingLoopRowId(loopRowId);
-      setStatus("Удаление строки...");
-
-      await api.delete(`/manual-fill/loop-row/${loopRowId}`, {
-        params: {
-          teacher_id: role === "admin" ? teacherId : undefined,
+  function setTeachingLoadTable(loadKind, tableId) {
+    setCfg((prev) => ({
+      ...prev,
+      template_bindings: {
+        teaching_load: {
+          ...prev.template_bindings.teaching_load,
+          [loadKind]: tableId ? { raw_table_id: Number(tableId) } : {},
         },
-      });
-
-      setStatus("Строка удалена ✅");
-      await loadForm(rawTemplateId, teacherId);
-    } catch (e) {
-      console.error(e);
-      setStatus(e?.response?.data?.detail || "Ошибка удаления строки");
-    } finally {
-      setDeletingLoopRowId(0);
-    }
+      },
+    }));
   }
+
+  useEffect(() => {
+    loadExcelTemplates();
+  }, []);
+
+  useEffect(() => {
+    if (!excelForYear) {
+      setCols([]);
+      setTables([]);
+      return;
+    }
+
+    const id = excelForYear.id;
+    setExcelTemplateId(String(id));
+
+    loadColumns(id);
+    loadRawTables();
+    loadSettings();
+  }, [excelTemplates, academicYear]);
 
   return (
-    <div className="container">
-      <div className="page-title">Заполнение разделов</div>
+    <div
+      className="container"
+      style={{
+        maxWidth: 1280,
+        paddingTop: 28,
+        paddingBottom: 40,
+      }}
+    >
+      <div
+        className="page-title"
+        style={{
+          fontSize: 52,
+          fontWeight: 800,
+          lineHeight: 1.05,
+          letterSpacing: "-0.03em",
+          marginBottom: 24,
+          color: "#17356f",
+        }}
+      >
+        Настройка
+      </div>
 
-      <div className="card card-pad">
-        <div
-          className="card"
-          style={{
-            padding: 14,
-            borderRadius: 14,
-            border: "1px solid rgba(15,23,42,.10)",
-            background: "#f8fbff",
-            marginBottom: 16,
-          }}
-        >
-          <div style={{ fontWeight: 800, marginBottom: 8 }}>
-            Что здесь делается
-          </div>
-
-          <div className="small" style={{ display: "grid", gap: 6 }}>
-            <div>1. Выбирается учебный год и преподаватель</div>
-            <div>2. Заполняются только те разделы, которых нет в Excel</div>
-            <div>3. Все введённые данные сохраняются для дальнейшей генерации ИПП</div>
-          </div>
-        </div>
-
+      <div
+        className="card card-pad"
+        style={{
+          borderRadius: 28,
+          padding: 24,
+          background: "rgba(255,255,255,0.94)",
+          border: "1px solid rgba(30,58,138,0.08)",
+          boxShadow: "0 16px 50px rgba(15, 23, 42, 0.08)",
+        }}
+      >
         <div
           style={{
             display: "flex",
-            gap: 10,
+            gap: 14,
             flexWrap: "wrap",
             alignItems: "center",
-            marginBottom: 12,
+            justifyContent: "space-between",
+            marginBottom: 22,
           }}
         >
-          <input
-            className="input"
-            style={{ width: 200 }}
-            value={academicYear}
-            onChange={(e) => handleChangeYear(e.target.value)}
-            placeholder="2025-2026"
-          />
-
-          {role === "admin" ? (
-            <select
+          <div
+            style={{
+              display: "flex",
+              gap: 14,
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+          >
+            <input
               className="input"
-              style={{ width: 420 }}
-              value={teacherId ? String(teacherId) : ""}
-              onChange={(e) => {
-                const v = Number(e.target.value || 0);
-                setTeacherId(v);
-                localStorage.setItem("teacher_id", String(v));
-              }}
-            >
-              {!teachers.length ? (
-                <option value="">Нет преподавателей</option>
-              ) : (
-                teachers.map((t) => (
-                  <option key={t.id} value={String(t.id)}>
-                    {t.full_name}
-                  </option>
-                ))
-              )}
-            </select>
-          ) : null}
-
-          <div className="small">{loading ? "Загрузка..." : status}</div>
-        </div>
-
-        <div className="hr" />
-
-        {!tables.length && !loading ? (
-          <div className="small" style={{ padding: "8px 0" }}>
-            Нет таблиц для заполнения
-          </div>
-        ) : null}
-
-        {groupedSections.map((section) => (
-          <div key={section.sectionTitle} style={{ marginTop: 18 }}>
-            <div className="section-title">{section.sectionTitle}</div>
-
-            {section.items.map((table) => (
-              <div
-                className="card"
-                key={table.id}
-                style={{
-                  marginTop: 12,
-                  borderRadius: 14,
-                  overflow: "hidden",
-                  border: "1px solid rgba(15,23,42,.10)",
-                }}
-              >
-                <div
-                  style={{
-                    padding: 14,
-                    display: "flex",
-                    gap: 12,
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    flexWrap: "wrap",
-                    background: "#f8fbff",
-                    borderBottom: "1px solid rgba(15,23,42,.08)",
-                  }}
-                >
-                  <div style={{ display: "grid", gap: 4 }}>
-                    <div style={{ fontWeight: 800 }}>
-                      Таблица {Number(table.table_index) + 1}
-                    </div>
-                    <div className="small">
-                      {table.table_type === "loop" ? "Таблица со строками" : "Обычная таблица"}
-                    </div>
-                  </div>
-
-                  <button className="btn btn-outline" onClick={() => toggleOpen(table.id)}>
-                    {openTableIds[table.id] ? "Скрыть" : "Открыть"}
-                  </button>
-                </div>
-
-                {openTableIds[table.id] ? (
-                  <div style={{ padding: 14 }}>
-                    {table.table_type === "static" ? (
-                      <>
-                        <StaticTableGrid
-                          table={table}
-                          formValues={formValues}
-                          onChange={setStaticValue}
-                        />
-
-                        <div className="actions-row" style={{ marginTop: 12 }}>
-                          <button
-                            className="btn btn-primary"
-                            onClick={() => saveStaticTable(table)}
-                            disabled={savingStatic}
-                          >
-                            {savingStatic ? "Сохранение..." : "Сохранить"}
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <LoopTableEditor
-                        table={table}
-                        getLoopRowValue={getLoopRowValue}
-                        setLoopRowValue={setLoopRowValue}
-                        onAddRow={() => addLoopRow(table)}
-                        onSaveRow={(loopRowId) => saveLoopRow(loopRowId, table)}
-                        onDeleteRow={deleteLoopRow}
-                        addingLoopTableId={addingLoopTableId}
-                        savingLoopRowId={savingLoopRowId}
-                        deletingLoopRowId={deletingLoopRowId}
-                      />
-                    )}
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function compressRow(row) {
-  const out = [];
-  let i = 0;
-
-  while (i < row.length) {
-    const cell = row[i];
-    const text = String(cell?.text || "").trim();
-    const editable = !!cell?.editable;
-
-    if (editable) {
-      out.push({
-        type: "cell",
-        cell,
-        span: 1,
-      });
-      i += 1;
-      continue;
-    }
-
-    if (!text) {
-      out.push({
-        type: "cell",
-        cell,
-        span: 1,
-      });
-      i += 1;
-      continue;
-    }
-
-    let span = 1;
-    let j = i + 1;
-
-    while (j < row.length) {
-      const next = row[j];
-      const nextText = String(next?.text || "").trim();
-      const nextEditable = !!next?.editable;
-
-      if (nextEditable) break;
-      if (nextText !== text) break;
-
-      span += 1;
-      j += 1;
-    }
-
-    out.push({
-      type: "cell",
-      cell,
-      span,
-    });
-
-    i = j;
-  }
-
-  return out;
-}
-
-function StaticTableGrid({ table, formValues, onChange }) {
-  const matrix = Array.isArray(table.matrix) ? table.matrix : [];
-
-  return (
-    <div style={{ overflowX: "auto" }}>
-      <table
-        className="table"
-        style={{
-          minWidth: Math.max(760, (table.col_count || 1) * 140),
-          tableLayout: "fixed",
-          borderCollapse: "separate",
-          borderSpacing: 0,
-        }}
-      >
-        <tbody>
-          {matrix.length === 0 ? (
-            <tr>
-              <td>Нет данных</td>
-            </tr>
-          ) : (
-            matrix.map((row, rowIndex) => {
-              const compressed = compressRow(row);
-
-              return (
-                <tr key={`row-${rowIndex}`}>
-                  {compressed.map((item, idx) => {
-                    const cell = item.cell;
-
-                    return (
-                      <td
-                        key={`${cell.cell_key}-${idx}`}
-                        colSpan={item.span}
-                        style={{
-                          verticalAlign: "top",
-                          background: cell.editable ? "rgba(34,197,94,.05)" : "#fff",
-                          borderTop: "1px solid rgba(15,23,42,.06)",
-                          borderRight: "1px solid rgba(15,23,42,.04)",
-                          minWidth: 140,
-                          padding: 12,
-                        }}
-                      >
-                        {cell.editable ? (
-                          <input
-                            className="input"
-                            value={formValues[cell.raw_cell_id] ?? ""}
-                            onChange={(e) => onChange(cell.raw_cell_id, e.target.value)}
-                            placeholder="Введите значение"
-                            style={{
-                              background: "#fff",
-                              borderColor: "rgba(34,197,94,.30)",
-                            }}
-                          />
-                        ) : (
-                          <div
-                            style={{
-                              whiteSpace: "pre-wrap",
-                              fontSize: 14,
-                              lineHeight: 1.4,
-                              color: "#0f172a",
-                            }}
-                          >
-                            {cell.text || ""}
-                          </div>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function LoopTableEditor({
-  table,
-  getLoopRowValue,
-  setLoopRowValue,
-  onAddRow,
-  onSaveRow,
-  onDeleteRow,
-  addingLoopTableId,
-  savingLoopRowId,
-  deletingLoopRowId,
-}) {
-  const templateRow =
-    table.loop_template_row_index !== null &&
-    table.loop_template_row_index !== undefined
-      ? table.matrix?.[table.loop_template_row_index] || null
-      : null;
-
-  return (
-    <div>
-      <div
-        style={{
-          marginBottom: 12,
-          padding: 12,
-          borderRadius: 12,
-          background: "rgba(47,107,255,.06)",
-          border: "1px solid rgba(47,107,255,.12)",
-        }}
-      >
-        <div style={{ fontWeight: 700, marginBottom: 4 }}>Добавляемые строки</div>
-        <div className="small">
-          Здесь можно добавлять и редактировать строки этого раздела.
-        </div>
-      </div>
-
-      <div className="actions-row" style={{ marginTop: 12 }}>
-        <button
-          className="btn btn-primary"
-          onClick={onAddRow}
-          disabled={addingLoopTableId === table.id}
-        >
-          {addingLoopTableId === table.id ? "Добавление..." : "Добавить строку"}
-        </button>
-      </div>
-
-      {!table.loop_rows?.length ? (
-        <div className="small" style={{ marginTop: 12 }}>
-          Пока нет добавленных строк
-        </div>
-      ) : (
-        <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
-          {table.loop_rows.map((row) => (
-            <div
-              key={row.loop_row_id}
-              className="card"
               style={{
-                borderRadius: 12,
-                border: "1px solid rgba(15,23,42,.10)",
-                padding: 12,
+                width: 220,
+                height: 48,
+                borderRadius: 14,
+                border: "1px solid #d9e3f5",
+                background: "#f8fbff",
+                boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
+              }}
+              value={academicYear}
+              onChange={(e) => setAcademicYear(e.target.value)}
+              placeholder="2025-2026"
+            />
+
+            <div
+              className="small"
+              style={{
+                color: status ? "#315fcb" : "#7c8aa5",
+                fontWeight: 500,
+                minHeight: 20,
               }}
             >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 10,
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  marginBottom: 10,
-                }}
-              >
-                <div style={{ fontWeight: 700 }}>
-                  Строка {row.row_order}
-                </div>
-
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => onSaveRow(row.loop_row_id)}
-                    disabled={savingLoopRowId === row.loop_row_id}
-                  >
-                    {savingLoopRowId === row.loop_row_id ? "Сохранение..." : "Сохранить"}
-                  </button>
-
-                  <button
-                    className="btn btn-danger"
-                    onClick={() => onDeleteRow(row.loop_row_id)}
-                    disabled={deletingLoopRowId === row.loop_row_id}
-                  >
-                    {deletingLoopRowId === row.loop_row_id ? "Удаление..." : "Удалить"}
-                  </button>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: `repeat(${Math.max(1, Number(table.col_count || 1))}, minmax(160px, 1fr))`,
-                  gap: 10,
-                }}
-              >
-                {Array.from({ length: Number(table.col_count || 0) }).map((_, colIndex) => {
-                  const hint =
-                    table.column_hints?.[colIndex] ||
-                    templateRow?.[colIndex]?.text ||
-                    `Колонка ${colIndex + 1}`;
-
-                  return (
-                    <div key={`${row.loop_row_id}-${colIndex}`}>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 700,
-                          marginBottom: 6,
-                          color: "#334155",
-                        }}
-                      >
-                        {hint}
-                      </div>
-                      <input
-                        className="input"
-                        value={getLoopRowValue(row.loop_row_id, colIndex)}
-                        onChange={(e) =>
-                          setLoopRowValue(row.loop_row_id, colIndex, e.target.value)
-                        }
-                        placeholder="Введите значение"
-                      />
-                    </div>
-                  );
-                })}
-              </div>
+              {status}
             </div>
-          ))}
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              flexWrap: "wrap",
+              alignItems: "center",
+            }}
+          >
+            <div
+              style={{
+                padding: "10px 14px",
+                borderRadius: 12,
+                background: "#f7faff",
+                border: "1px solid #dfe8f7",
+                color: "#5f7195",
+                fontSize: 13,
+                fontWeight: 700,
+              }}
+            >
+              Кафедра ID: {departmentId || "—"}
+            </div>
+
+            <div
+              style={{
+                padding: "10px 14px",
+                borderRadius: 12,
+                background: "#f7faff",
+                border: "1px solid #dfe8f7",
+                color: "#5f7195",
+                fontSize: 13,
+                fontWeight: 700,
+              }}
+            >
+              Excel шаблон: {excelTemplateId || "—"}
+            </div>
+
+            <button
+              className="btn btn-primary"
+              onClick={saveSettings}
+              style={{
+                minWidth: 150,
+                height: 46,
+                borderRadius: 14,
+                fontWeight: 700,
+                boxShadow: "0 12px 24px rgba(58,110,255,0.18)",
+              }}
+            >
+              Сохранить
+            </button>
+          </div>
         </div>
-      )}
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+            gap: 20,
+          }}
+        >
+          <SectionCard title="Маппинг колонок">
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: 16,
+              }}
+            >
+              <SelectRow
+                label="ФИО"
+                value={cfg.columns.teacher_col}
+                cols={cols}
+                onChange={(v) => setCol("teacher_col", v)}
+              />
+
+              <SelectRow
+                label="Штатные часы"
+                value={cfg.columns.staff_hours_col}
+                cols={cols}
+                onChange={(v) => setCol("staff_hours_col", v)}
+              />
+
+              <SelectRow
+                label="Почасовые часы"
+                value={cfg.columns.hourly_hours_col}
+                cols={cols}
+                onChange={(v) => setCol("hourly_hours_col", v)}
+              />
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Типы занятий">
+            <div
+              style={{
+                display: "grid",
+                gap: 16,
+              }}
+            >
+              <TextRow
+                label="Лекции"
+                value={cfg.activity_types.lecture.join(", ")}
+                onChange={(v) => setActivityPatterns("lecture", v)}
+              />
+
+              <TextRow
+                label="Лабораторные / практика"
+                value={cfg.activity_types.lab_practice.join(", ")}
+                onChange={(v) => setActivityPatterns("lab_practice", v)}
+              />
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Правила объединения">
+            <div
+              style={{
+                display: "grid",
+                gap: 16,
+              }}
+            >
+              <TextRow
+                label="Key cols"
+                value={cfg.merge_rules.key_cols.join(", ")}
+                onChange={(v) => setMergeRuleArray("key_cols", v)}
+              />
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Привязка таблиц">
+            <div
+              style={{
+                display: "grid",
+                gap: 16,
+              }}
+            >
+              <TeachingLoadBinding
+                label="Штатка"
+                tables={tables}
+                value={cfg.template_bindings.teaching_load.staff.raw_table_id}
+                onChange={(v) => setTeachingLoadTable("staff", v)}
+              />
+
+              <TeachingLoadBinding
+                label="Почасовая"
+                tables={tables}
+                value={cfg.template_bindings.teaching_load.hourly.raw_table_id}
+                onChange={(v) => setTeachingLoadTable("hourly", v)}
+              />
+            </div>
+          </SectionCard>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SectionCard({ title, children }) {
+  return (
+    <section
+      style={{
+        borderRadius: 24,
+        border: "1px solid #e4ebf7",
+        background: "#ffffff",
+        boxShadow: "0 10px 28px rgba(15, 23, 42, 0.04)",
+        padding: 22,
+      }}
+    >
+      <div style={{ marginBottom: 18 }}>
+        <div
+          style={{
+            fontSize: 28,
+            fontWeight: 800,
+            color: "#17356f",
+            lineHeight: 1.1,
+            marginBottom: 0,
+            letterSpacing: "-0.02em",
+          }}
+        >
+          {title}
+        </div>
+      </div>
+
+      {children}
+    </section>
+  );
+}
+
+function SelectRow({ label, value, cols, onChange }) {
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <label
+        style={{
+          fontSize: 15,
+          fontWeight: 700,
+          color: "#334155",
+        }}
+      >
+        {label}
+      </label>
+
+      <select
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          width: "100%",
+          height: 52,
+          borderRadius: 14,
+          border: "1px solid #d9e3f5",
+          background: "#f8fbff",
+          padding: "0 14px",
+          fontSize: 15,
+          color: "#1f2f4d",
+          outline: "none",
+          boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
+        }}
+      >
+        <option value="">—</option>
+        {(cols || []).map((c) => (
+          <option key={c.column_name} value={c.column_name}>
+            {c.header_text}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function TextRow({ label, value, onChange }) {
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <label
+        style={{
+          fontSize: 15,
+          fontWeight: 700,
+          color: "#334155",
+        }}
+      >
+        {label}
+      </label>
+
+      <input
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          width: "100%",
+          height: 52,
+          borderRadius: 14,
+          border: "1px solid #d9e3f5",
+          background: "#f8fbff",
+          padding: "0 14px",
+          fontSize: 15,
+          color: "#1f2f4d",
+          outline: "none",
+          boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
+        }}
+      />
+    </div>
+  );
+}
+
+function TeachingLoadBinding({ label, tables, value, onChange }) {
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <label
+        style={{
+          fontSize: 15,
+          fontWeight: 700,
+          color: "#334155",
+        }}
+      >
+        {label}
+      </label>
+
+      <select
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          width: "100%",
+          height: 52,
+          borderRadius: 14,
+          border: "1px solid #d9e3f5",
+          background: "#f8fbff",
+          padding: "0 14px",
+          fontSize: 15,
+          color: "#1f2f4d",
+          outline: "none",
+          boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
+        }}
+      >
+        <option value="">Выбери таблицу</option>
+        {(tables || []).map((t) => (
+          <option key={t.id} value={t.id}>
+            Таблица {t.table_index + 1}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
