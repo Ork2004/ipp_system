@@ -71,81 +71,22 @@
   z-index: 1;
   min-height: 100vh;
   width: 100%;
-  display: grid;
-  grid-template-columns: 1.1fr 0.9fr;
-  align-items: center;
-  gap: 48px;
-  padding: 48px 72px;
-}
-
-.login-info {
-  max-width: 680px;
-}
-
-.login-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.12);
-  color: #d9e7ff;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  margin-bottom: 24px;
-  backdrop-filter: blur(10px);
-}
-
-.hero-title {
-  margin: 0 0 18px;
-  font-size: 52px;
-  line-height: 1.05;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  color: #ffffff;
-}
-
-.hero-subtitle {
-  margin: 0 0 28px;
-  max-width: 620px;
-  font-size: 18px;
-  line-height: 1.7;
-  color: var(--muted);
-}
-
-.hero-points {
   display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.hero-point {
-  display: flex;
+  justify-content: center;
   align-items: center;
-  gap: 12px;
-  color: #eaf2ff;
-  font-size: 16px;
-}
-
-.point-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: linear-gradient(135deg, var(--accent), var(--primary-2));
-  box-shadow: 0 0 16px rgba(126, 240, 197, 0.6);
-  flex-shrink: 0;
+  padding: 32px 20px;
 }
 
 .login-card-wrap {
+  width: 100%;
   display: flex;
   justify-content: center;
+  align-items: center;
 }
 
 .login-card {
   width: 100%;
-  max-width: 470px;
+  max-width: 500px;
   padding: 30px;
   border-radius: 28px;
   background: linear-gradient(
@@ -217,14 +158,6 @@
   align-items: center;
 }
 
-.input-icon {
-  position: absolute;
-  left: 14px;
-  font-size: 16px;
-  opacity: 0.9;
-  pointer-events: none;
-}
-
 .input {
   width: 100%;
   height: 56px;
@@ -232,7 +165,7 @@
   border: 1px solid var(--input-border);
   background: var(--input-bg);
   color: #ffffff;
-  padding: 0 16px 0 46px;
+  padding: 0 16px;
   font-size: 15px;
   outline: none;
   transition: 0.25s ease;
@@ -293,34 +226,10 @@
   cursor: not-allowed;
 }
 
-@media (max-width: 1100px) {
-  .login-shell {
-    grid-template-columns: 1fr;
-    gap: 32px;
-    padding: 32px 20px;
-  }
-
-  .login-info {
-    max-width: 100%;
-  }
-
-  .hero-title {
-    font-size: 38px;
-  }
-
-  .hero-subtitle {
-    font-size: 16px;
-  }
-}
-
 @media (max-width: 640px) {
   .login-card {
     padding: 22px;
     border-radius: 24px;
-  }
-
-  .hero-title {
-    font-size: 32px;
   }
 
   .login-title {

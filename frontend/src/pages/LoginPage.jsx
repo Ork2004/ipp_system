@@ -63,23 +63,14 @@ export default function LoginPage() {
       <div className="bg-orb orb-2" />
       <div className="bg-grid" />
 
-      {/* 🔥 ТОЛЬКО ЦЕНТР */}
-      <div
-        className="login-shell"
-        style={{
-          justifyContent: "center",
-          alignItems: "center",
-        }}
-      >
+      <div className="login-shell">
         <div className="login-card-wrap">
           <div className="login-card">
             <div className="login-card-top">
               <div className="login-logo">IPP</div>
               <div>
                 <div className="login-title">Вход</div>
-                <div className="login-subtitle">
-                  Введите логин и пароль
-                </div>
+                <div className="login-subtitle">Введите логин и пароль</div>
               </div>
             </div>
 
@@ -115,11 +106,7 @@ export default function LoginPage() {
 
               {error ? <div className="login-error">{error}</div> : null}
 
-              <button
-                className="login-btn"
-                type="submit"
-                disabled={loading}
-              >
+              <button className="login-btn" type="submit" disabled={loading}>
                 {loading ? "Вход..." : "Войти"}
               </button>
             </form>
