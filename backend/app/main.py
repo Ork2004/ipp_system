@@ -12,6 +12,8 @@ from backend.app.api.history_api import router as history_router
 from backend.app.api.blocks_api import router as blocks_router
 from backend.app.api.raw_template_api import router as raw_template_router
 from backend.app.api.manual_fill_api import router as manual_fill_router
+from backend.app.api.form63_api import router as form63_router
+
 app = FastAPI(title="IPP System API")
 
 app.add_middleware(
@@ -38,3 +40,4 @@ app.include_router(blocks_router)
 app.include_router(generate_router)
 app.include_router(raw_template_router)
 app.include_router(manual_fill_router)
+app.include_router(form63_router)
