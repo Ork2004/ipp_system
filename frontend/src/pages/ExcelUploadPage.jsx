@@ -110,7 +110,7 @@ export default function ExcelUploadPage() {
       localStorage.setItem("academic_year", academicYear);
       setFile(null);
       setStatus("Загружено");
-      await loadTemplates(departmentId);
+      loadTemplates(departmentId);
     } catch (e) {
       setStatus(e?.response?.data?.detail || "Ошибка загрузки");
     } finally {
@@ -130,7 +130,7 @@ export default function ExcelUploadPage() {
         params: { department_id: departmentId, academic_year: year },
       });
       setStatus("Удалено");
-      await loadTemplates(departmentId);
+      loadTemplates(departmentId);
     } catch (e) {
       setStatus(e?.response?.data?.detail || "Ошибка удаления");
     }

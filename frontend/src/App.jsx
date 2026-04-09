@@ -8,6 +8,7 @@ import SettingsPage from "./pages/SettingsPage";
 import GeneratePage from "./pages/GeneratePage";
 import RawTemplateUploadPage from "./pages/RawTemplateUploadPage";
 import ManualTablesPage from "./pages/ManualTablesPage";
+import Form63Page from "./pages/Form63Page";
 
 function RequireAuth({ children }) {
   const token = localStorage.getItem("token");
@@ -84,6 +85,16 @@ export default function App() {
           element={
             <RequireAdmin>
               <ManualTablesPage />
+            </RequireAdmin>
+          }
+        />
+
+
+        <Route
+          path="/form63"
+          element={
+            <RequireAdmin>
+              <Form63Page />
             </RequireAdmin>
           }
         />

@@ -86,6 +86,10 @@ export default function Navbar() {
                   <NavLink to="/manual-tables" style={navItemStyle}>
                     Таблицы
                   </NavLink>
+
+                  <NavLink to="/form63" style={navItemStyle}>
+                    Форма 63
+                  </NavLink>
                 </>
               ) : null}
 
