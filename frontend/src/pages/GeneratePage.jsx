@@ -14,12 +14,38 @@ function getApiBaseUrl() {
   return (api.defaults.baseURL || "http://127.0.0.1:8000").replace(/\/$/, "");
 }
 
+const selectStyle = {
+  width: 220,
+  height: 52,
+  borderRadius: 14,
+  border: "1px solid #d9e3f5",
+  background: "#f8fbff",
+  boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
+  color: "#17356f",
+  fontSize: 16,
+  fontWeight: 700,
+  padding: "0 16px",
+  outline: "none",
+  opacity: 1,
+  WebkitTextFillColor: "#17356f",
+};
+
+const teacherSelectStyle = {
+  ...selectStyle,
+  width: 420,
+};
+
+const labelStyle = {
+  fontSize: 14,
+  fontWeight: 700,
+  color: "#5f7195",
+  marginBottom: 8,
+};
+
 export default function GeneratePage() {
   const role = useMemo(() => localStorage.getItem("role") || "guest", []);
 
-  const [departmentId, setDepartmentId] = useState(
-    Number(localStorage.getItem("department_id") || 0)
-  );
+  const [departmentId, setDepartmentId] = useState(0);
   const [academicYear, setAcademicYear] = useState(
     localStorage.getItem("academic_year") || "2025-2026"
   );
@@ -40,9 +66,17 @@ export default function GeneratePage() {
 
   const years = useMemo(() => {
     const set = new Set();
-    (excelTemplates || []).forEach((t) => t.academic_year && set.add(t.academic_year));
-    (rawTemplates || []).forEach((t) => t.academic_year && set.add(t.academic_year));
-    set.add(academicYear);
+
+    (excelTemplates || []).forEach((t) => {
+      if (t.academic_year) set.add(String(t.academic_year));
+    });
+
+    (rawTemplates || []).forEach((t) => {
+      if (t.academic_year) set.add(String(t.academic_year));
+    });
+
+    if (academicYear) set.add(String(academicYear));
+
     return Array.from(set).sort().reverse();
   }, [excelTemplates, rawTemplates, academicYear]);
 
@@ -58,56 +92,81 @@ export default function GeneratePage() {
     );
   }, [rawTemplates, academicYear]);
 
-  async function loadTeachers() {
-    if (role !== "admin") return;
+  async function loadTeachers(depId, currentTeacherId = 0) {
+    if (role !== "admin" || !depId) return;
+
     try {
       const res = await api.get("/teachers", {
-        params: { department_id: departmentId },
+        params: { department_id: depId },
       });
-      const list = res.data || [];
+
+      const list = Array.isArray(res.data) ? res.data : [];
       setTeachers(list);
 
-      if (!teacherId && list.length) {
-        const first = list[0].id;
-        setTeacherId(Number(first));
+      if (!list.length) {
+        setTeacherId(0);
+        localStorage.removeItem("teacher_id");
+        return;
+      }
+
+      const hasCurrent = list.some((t) => Number(t.id) === Number(currentTeacherId));
+
+      if (hasCurrent) {
+        setTeacherId(Number(currentTeacherId));
+      } else {
+        const first = Number(list[0].id);
+        setTeacherId(first);
         localStorage.setItem("teacher_id", String(first));
       }
     } catch (e) {
       console.error(e);
+      setTeachers([]);
     }
   }
 
-  async function loadYearLists() {
-    if (!departmentId) return;
+  async function loadYearLists(depId) {
+    if (!depId) return;
+
     try {
       const [ex, raw] = await Promise.all([
-        api.get("/excel/templates", { params: { department_id: departmentId } }),
-        api.get("/raw-template/templates", { params: { department_id: departmentId } }),
+        api.get("/excel/templates", { params: { department_id: depId } }),
+        api.get("/raw-template/templates", { params: { department_id: depId } }),
       ]);
-      setExcelTemplates(ex.data || []);
-      setRawTemplates(raw.data || []);
+
+      setExcelTemplates(Array.isArray(ex.data) ? ex.data : []);
+      setRawTemplates(Array.isArray(raw.data) ? raw.data : []);
     } catch (e) {
       console.error(e);
+      setExcelTemplates([]);
+      setRawTemplates([]);
     }
   }
 
-  async function loadHistory() {
+  async function loadHistory(selectedTeacherId = teacherId) {
     try {
       setHistStatus("Загрузка истории...");
+
       const params = { limit: 50, offset: 0 };
-      if (role === "admin" && teacherId) params.teacher_id = Number(teacherId);
+
+      if (role === "admin" && selectedTeacherId) {
+        params.teacher_id = Number(selectedTeacherId);
+      }
+
       const res = await api.get("/history", { params });
       setHist(Array.isArray(res.data) ? res.data : []);
       setHistStatus("");
     } catch (e) {
       console.error(e);
       setHistStatus(e?.response?.data?.detail || "Ошибка истории");
+      setHist([]);
     }
   }
 
   function makeDownloadLinkFromPath(outputPath) {
     if (!outputPath) return "";
-    return `${getApiBaseUrl()}/generate/download?path=${encodeURIComponent(outputPath)}`;
+    return `${getApiBaseUrl()}/generate/download?path=${encodeURIComponent(
+      outputPath
+    )}`;
   }
 
   async function generate() {
@@ -115,18 +174,22 @@ export default function GeneratePage() {
       setStatus("Нет department_id. Выйди и зайди заново.");
       return;
     }
+
     if (!academicYear) {
       setStatus("Выбери год");
       return;
     }
+
     if (!hasExcel) {
       setStatus("Нет Excel для этого года");
       return;
     }
+
     if (!hasRawTemplate) {
       setStatus("Нет raw шаблона для этого года");
       return;
     }
+
     if (role === "admin" && !teacherId) {
       setStatus("Выбери преподавателя");
       return;
@@ -139,52 +202,62 @@ export default function GeneratePage() {
       const res = await api.post("/generate/teacher", {
         teacher_id:
           role === "admin"
-            ? teacherId
+            ? Number(teacherId)
             : Number(localStorage.getItem("teacher_id") || 0),
-        department_id: departmentId,
+        department_id: Number(departmentId),
         academic_year: academicYear,
       });
 
-      setStatus("Готово ✅");
+      setStatus("Готово");
       setDownloadUrl(res.data.download_url || "");
-
-      await loadHistory();
+      await loadHistory(role === "admin" ? teacherId : 0);
     } catch (e) {
       console.error(e);
       setStatus(
         `Ошибка ❌ ${e?.response?.data?.detail || "проверь настройки/шаблоны"}`
       );
-      await loadHistory();
+      await loadHistory(role === "admin" ? teacherId : 0);
     }
   }
 
   useEffect(() => {
-    setDepartmentId(Number(localStorage.getItem("department_id") || 0));
-    setTeacherId(Number(localStorage.getItem("teacher_id") || 0));
+    const dep = Number(localStorage.getItem("department_id") || 0);
+    const savedTeacherId = Number(localStorage.getItem("teacher_id") || 0);
+    const savedYear = localStorage.getItem("academic_year") || "2025-2026";
 
-    loadYearLists();
-    loadTeachers();
-    loadHistory();
+    setDepartmentId(dep);
+    setTeacherId(savedTeacherId);
+    setAcademicYear(savedYear);
+
+    if (!dep) return;
+
+    loadYearLists(dep);
+    loadTeachers(dep, savedTeacherId);
+    loadHistory(savedTeacherId);
 
     const refresh = () => {
-      loadYearLists();
-      loadTeachers();
-      loadHistory();
+      loadYearLists(dep);
+      loadTeachers(dep, Number(localStorage.getItem("teacher_id") || 0));
+      loadHistory(Number(localStorage.getItem("teacher_id") || 0));
     };
 
     window.addEventListener("focus", refresh);
-    const onVis = () => document.visibilityState === "visible" && refresh();
+    const onVis = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
     document.addEventListener("visibilitychange", onVis);
 
     return () => {
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, []);
+  }, [role]);
 
   useEffect(() => {
-    if (role === "admin") loadHistory();
-  }, [teacherId]);
+    if (role === "admin") {
+      loadHistory(teacherId);
+    }
+  }, [teacherId, role]);
 
   return (
     <div
@@ -222,79 +295,87 @@ export default function GeneratePage() {
         <div
           style={{
             display: "flex",
-            gap: 14,
+            gap: 18,
             flexWrap: "wrap",
-            alignItems: "center",
+            alignItems: "flex-end",
             marginBottom: 18,
           }}
         >
-          <select
-            className="input"
-            style={{
-              width: 220,
-              height: 48,
-              borderRadius: 14,
-              border: "1px solid #d9e3f5",
-              background: "#f8fbff",
-              boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
-            }}
-            value={academicYear}
-            onChange={(e) => {
-              const y = e.target.value;
-              setAcademicYear(y);
-              localStorage.setItem("academic_year", y);
-            }}
-          >
-            {years.map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
-            ))}
-          </select>
-
-          {role === "admin" ? (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div style={labelStyle}>Учебный год</div>
             <select
               className="input"
-              style={{
-                width: 420,
-                height: 48,
-                borderRadius: 14,
-                border: "1px solid #d9e3f5",
-                background: "#f8fbff",
-                boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
-              }}
-              value={teacherId ? String(teacherId) : ""}
+              style={selectStyle}
+              value={academicYear}
               onChange={(e) => {
-                const v = Number(e.target.value || 0);
-                setTeacherId(v);
-                localStorage.setItem("teacher_id", String(v));
+                const y = e.target.value;
+                setAcademicYear(y);
+                localStorage.setItem("academic_year", y);
               }}
             >
-              {!teachers.length ? (
-                <option value="">Нет преподавателей</option>
-              ) : (
-                teachers.map((t) => (
-                  <option key={t.id} value={String(t.id)}>
-                    {t.full_name}
-                  </option>
-                ))
-              )}
+              {years.map((y) => (
+                <option key={y} value={y} style={{ color: "#17356f" }}>
+                  {y}
+                </option>
+              ))}
             </select>
+          </div>
+
+          {role === "admin" ? (
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              <div style={labelStyle}>Преподаватель</div>
+              <select
+                className="input"
+                style={teacherSelectStyle}
+                value={teacherId ? String(teacherId) : ""}
+                onChange={(e) => {
+                  const v = Number(e.target.value || 0);
+                  setTeacherId(v);
+                  localStorage.setItem("teacher_id", String(v));
+                }}
+              >
+                {!teachers.length ? (
+                  <option value="" style={{ color: "#17356f" }}>
+                    Нет преподавателей
+                  </option>
+                ) : (
+                  teachers.map((t) => (
+                    <option
+                      key={t.id}
+                      value={String(t.id)}
+                      style={{ color: "#17356f" }}
+                    >
+                      {t.full_name}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
           ) : null}
 
           <div
             className="small"
             style={{
               color: status ? "#315fcb" : "#7c8aa5",
-              fontWeight: 500,
+              fontWeight: 600,
+              minHeight: 24,
+              paddingBottom: 10,
             }}
           >
             {status}
           </div>
         </div>
 
-        <div className="small" style={{ marginBottom: 12 }}>
-          Excel: {hasExcel ? "есть" : "нет"} | Raw шаблон: {hasRawTemplate ? "есть" : "нет"}
+        <div
+          className="small"
+          style={{
+            marginBottom: 16,
+            color: "#5f7195",
+            fontWeight: 600,
+          }}
+        >
+          Excel: {hasExcel ? "есть" : "нет"} | Raw шаблон:{" "}
+          {hasRawTemplate ? "есть" : "нет"}
         </div>
 
         <div className="actions-row">
@@ -319,7 +400,13 @@ export default function GeneratePage() {
           <div style={{ marginTop: 14 }}>
             <button
               className="btn btn-outline"
-              onClick={() => window.open(`${getApiBaseUrl()}${downloadUrl}`, "_blank", "noreferrer")}
+              onClick={() =>
+                window.open(
+                  `${getApiBaseUrl()}${downloadUrl}`,
+                  "_blank",
+                  "noreferrer"
+                )
+              }
               style={{
                 borderRadius: 12,
                 minWidth: 180,
@@ -513,7 +600,9 @@ export default function GeneratePage() {
                         }}
                       >
                         {h.generated_by_role
-                          ? `${h.generated_by_role} #${h.generated_by_user_id || ""}`
+                          ? `${h.generated_by_role} #${
+                              h.generated_by_user_id || ""
+                            }`
                           : ""}
                       </td>
 

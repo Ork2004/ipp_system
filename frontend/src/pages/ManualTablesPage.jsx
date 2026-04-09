@@ -1,18 +1,49 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 
+const fieldStyle = {
+  width: 220,
+  height: 52,
+  borderRadius: 14,
+  border: "1px solid #d9e3f5",
+  background: "#f8fbff",
+  boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
+  color: "#17356f",
+  fontSize: 16,
+  fontWeight: 700,
+  padding: "0 16px",
+  outline: "none",
+  opacity: 1,
+  WebkitTextFillColor: "#17356f",
+};
+
+const teacherFieldStyle = {
+  ...fieldStyle,
+  width: 420,
+};
+
+const labelStyle = {
+  fontSize: 14,
+  fontWeight: 700,
+  color: "#5f7195",
+  marginBottom: 8,
+};
+
 export default function ManualTablesPage() {
   const role = localStorage.getItem("role") || "guest";
 
   const [departmentId] = useState(
     Number(localStorage.getItem("department_id") || 0)
   );
+
   const [academicYear, setAcademicYear] = useState(
     localStorage.getItem("academic_year") || "2025-2026"
   );
+
   const [rawTemplateId, setRawTemplateId] = useState(
     Number(localStorage.getItem("raw_template_id") || 0)
   );
+
   const [teacherId, setTeacherId] = useState(
     Number(localStorage.getItem("teacher_id") || 0)
   );
@@ -45,23 +76,35 @@ export default function ManualTablesPage() {
     }));
   }, [tables]);
 
-  async function loadTeachers() {
+  async function loadTeachers(currentTeacherId = 0) {
     if (role !== "admin" || !departmentId) return;
 
     try {
       const res = await api.get("/teachers", {
         params: { department_id: departmentId },
       });
+
       const list = Array.isArray(res.data) ? res.data : [];
       setTeachers(list);
 
-      if (!teacherId && list.length) {
+      if (!list.length) {
+        setTeacherId(0);
+        localStorage.removeItem("teacher_id");
+        return;
+      }
+
+      const hasCurrent = list.some((t) => Number(t.id) === Number(currentTeacherId));
+
+      if (hasCurrent) {
+        setTeacherId(Number(currentTeacherId));
+      } else {
         const firstId = Number(list[0].id);
         setTeacherId(firstId);
         localStorage.setItem("teacher_id", String(firstId));
       }
     } catch (e) {
       console.error(e);
+      setTeachers([]);
     }
   }
 
@@ -76,10 +119,12 @@ export default function ManualTablesPage() {
     });
 
     const id = Number(res.data?.id || 0);
+
     if (id) {
       localStorage.setItem("raw_template_id", String(id));
       setRawTemplateId(id);
     }
+
     return id;
   }
 
@@ -163,13 +208,14 @@ export default function ManualTablesPage() {
     }
   }
 
-  async function reloadCurrent() {
+  async function reloadCurrent(nextYear = academicYear, nextTeacherId = teacherId) {
     try {
       setStatus("Загрузка...");
+
       let id = Number(localStorage.getItem("raw_template_id") || 0);
 
-      if (!id) {
-        id = await resolveRawTemplateIdByYear(academicYear);
+      if (!id || String(localStorage.getItem("academic_year") || "") !== String(nextYear)) {
+        id = await resolveRawTemplateIdByYear(nextYear);
       }
 
       if (!id) {
@@ -179,7 +225,7 @@ export default function ManualTablesPage() {
       }
 
       setRawTemplateId(id);
-      await loadForm(id, teacherId);
+      await loadForm(id, nextTeacherId);
     } catch (e) {
       console.error(e);
       setStatus(e?.response?.data?.detail || "Ошибка загрузки");
@@ -188,11 +234,16 @@ export default function ManualTablesPage() {
   }
 
   useEffect(() => {
-    loadTeachers();
-  }, []);
+    const savedYear = localStorage.getItem("academic_year") || "2025-2026";
+    const savedTemplateId = Number(localStorage.getItem("raw_template_id") || 0);
+    const savedTeacherId = Number(localStorage.getItem("teacher_id") || 0);
 
-  useEffect(() => {
-    reloadCurrent();
+    setAcademicYear(savedYear);
+    setRawTemplateId(savedTemplateId);
+    setTeacherId(savedTeacherId);
+
+    loadTeachers(savedTeacherId);
+    reloadCurrent(savedYear, savedTeacherId);
 
     const refresh = () => {
       const nextYear = localStorage.getItem("academic_year") || "2025-2026";
@@ -202,11 +253,19 @@ export default function ManualTablesPage() {
       setAcademicYear(nextYear);
       setRawTemplateId(nextTemplateId);
       setTeacherId(nextTeacherId);
-      reloadCurrent();
+
+      loadTeachers(nextTeacherId);
+      reloadCurrent(nextYear, nextTeacherId);
     };
 
     window.addEventListener("focus", refresh);
-    const onVis = () => document.visibilityState === "visible" && refresh();
+
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        refresh();
+      }
+    };
+
     document.addEventListener("visibilitychange", onVis);
 
     return () => {
@@ -231,11 +290,13 @@ export default function ManualTablesPage() {
     try {
       setStatus("Поиск шаблона...");
       const id = await resolveRawTemplateIdByYear(nextYear);
+
       if (!id) {
         setTables([]);
         setStatus("Шаблон для этого года не найден");
         return;
       }
+
       await loadForm(id, teacherId);
     } catch (e) {
       console.error(e);
@@ -273,7 +334,7 @@ export default function ManualTablesPage() {
         values,
       });
 
-      setStatus("Сохранено ✅");
+      setStatus("Сохранено");
       await loadForm(rawTemplateId, teacherId);
     } catch (e) {
       console.error(e);
@@ -309,7 +370,7 @@ export default function ManualTablesPage() {
       });
 
       await loadForm(rawTemplateId, teacherId);
-      setStatus("Строка добавлена ✅");
+      setStatus("Строка добавлена");
     } catch (e) {
       console.error(e);
       setStatus(e?.response?.data?.detail || "Ошибка добавления строки");
@@ -337,7 +398,7 @@ export default function ManualTablesPage() {
         values,
       });
 
-      setStatus("Строка сохранена ✅");
+      setStatus("Строка сохранена");
       await loadForm(rawTemplateId, teacherId);
     } catch (e) {
       console.error(e);
@@ -361,7 +422,7 @@ export default function ManualTablesPage() {
         },
       });
 
-      setStatus("Строка удалена ✅");
+      setStatus("Строка удалена");
       await loadForm(rawTemplateId, teacherId);
     } catch (e) {
       console.error(e);
@@ -407,63 +468,62 @@ export default function ManualTablesPage() {
         <div
           style={{
             display: "flex",
-            gap: 14,
+            gap: 18,
             flexWrap: "wrap",
-            alignItems: "center",
+            alignItems: "flex-end",
             marginBottom: 20,
           }}
         >
-          <input
-            className="input"
-            style={{
-              width: 220,
-              height: 48,
-              borderRadius: 14,
-              border: "1px solid #d9e3f5",
-              background: "#f8fbff",
-              boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
-            }}
-            value={academicYear}
-            onChange={(e) => handleChangeYear(e.target.value)}
-            placeholder="2025-2026"
-          />
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div style={labelStyle}>Учебный год</div>
+            <input
+              className="input"
+              style={fieldStyle}
+              value={academicYear}
+              onChange={(e) => handleChangeYear(e.target.value)}
+              placeholder="2025-2026"
+            />
+          </div>
 
           {role === "admin" ? (
-            <select
-              className="input"
-              style={{
-                width: 420,
-                height: 48,
-                borderRadius: 14,
-                border: "1px solid #d9e3f5",
-                background: "#f8fbff",
-                boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
-              }}
-              value={teacherId ? String(teacherId) : ""}
-              onChange={(e) => {
-                const v = Number(e.target.value || 0);
-                setTeacherId(v);
-                localStorage.setItem("teacher_id", String(v));
-              }}
-            >
-              {!teachers.length ? (
-                <option value="">Нет преподавателей</option>
-              ) : (
-                teachers.map((t) => (
-                  <option key={t.id} value={String(t.id)}>
-                    {t.full_name}
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              <div style={labelStyle}>Преподаватель</div>
+              <select
+                className="input"
+                style={teacherFieldStyle}
+                value={teacherId ? String(teacherId) : ""}
+                onChange={(e) => {
+                  const v = Number(e.target.value || 0);
+                  setTeacherId(v);
+                  localStorage.setItem("teacher_id", String(v));
+                }}
+              >
+                {!teachers.length ? (
+                  <option value="" style={{ color: "#17356f" }}>
+                    Нет преподавателей
                   </option>
-                ))
-              )}
-            </select>
+                ) : (
+                  teachers.map((t) => (
+                    <option
+                      key={t.id}
+                      value={String(t.id)}
+                      style={{ color: "#17356f" }}
+                    >
+                      {t.full_name}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
           ) : null}
 
           <div
             className="small"
             style={{
               color: status ? "#315fcb" : "#7c8aa5",
-              fontWeight: 500,
-              minHeight: 20,
+              fontWeight: 600,
+              minHeight: 24,
+              paddingBottom: 10,
             }}
           >
             {loading ? "Загрузка..." : status}
