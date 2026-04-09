@@ -21,6 +21,20 @@ function downloadBlob(blob, filename) {
   window.URL.revokeObjectURL(url);
 }
 
+const visibleInputStyle = {
+  width: 220,
+  height: 48,
+  borderRadius: 14,
+  border: "1px solid #d9e3f5",
+  background: "#f8fbff",
+  boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
+  color: "#17356f",
+  WebkitTextFillColor: "#17356f",
+  fontWeight: 600,
+  opacity: 1,
+  caretColor: "#17356f",
+};
+
 export default function ExcelUploadPage() {
   const [academicYear, setAcademicYear] = useState(
     localStorage.getItem("academic_year") || "2025-2026"
@@ -197,14 +211,7 @@ export default function ExcelUploadPage() {
         >
           <input
             className="input"
-            style={{
-              width: 220,
-              height: 48,
-              borderRadius: 14,
-              border: "1px solid #d9e3f5",
-              background: "#f8fbff",
-              boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
-            }}
+            style={visibleInputStyle}
             value={academicYear}
             onChange={(e) => {
               setAcademicYear(e.target.value);
