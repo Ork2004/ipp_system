@@ -10,6 +10,10 @@ function fmtDateTime(v) {
   }
 }
 
+function getApiBaseUrl() {
+  return (api.defaults.baseURL || "http://127.0.0.1:8000").replace(/\/$/, "");
+}
+
 export default function GeneratePage() {
   const role = useMemo(() => localStorage.getItem("role") || "guest", []);
 
@@ -32,19 +36,15 @@ export default function GeneratePage() {
   const [histStatus, setHistStatus] = useState("");
 
   const [excelTemplates, setExcelTemplates] = useState([]);
-  const [docxTemplates, setDocxTemplates] = useState([]);
+  const [rawTemplates, setRawTemplates] = useState([]);
 
   const years = useMemo(() => {
     const set = new Set();
-    (excelTemplates || []).forEach(
-      (t) => t.academic_year && set.add(t.academic_year)
-    );
-    (docxTemplates || []).forEach(
-      (t) => t.academic_year && set.add(t.academic_year)
-    );
+    (excelTemplates || []).forEach((t) => t.academic_year && set.add(t.academic_year));
+    (rawTemplates || []).forEach((t) => t.academic_year && set.add(t.academic_year));
     set.add(academicYear);
     return Array.from(set).sort().reverse();
-  }, [excelTemplates, docxTemplates, academicYear]);
+  }, [excelTemplates, rawTemplates, academicYear]);
 
   const hasExcel = useMemo(() => {
     return (excelTemplates || []).some(
@@ -52,11 +52,11 @@ export default function GeneratePage() {
     );
   }, [excelTemplates, academicYear]);
 
-  const hasDocx = useMemo(() => {
-    return (docxTemplates || []).some(
+  const hasRawTemplate = useMemo(() => {
+    return (rawTemplates || []).some(
       (t) => String(t.academic_year) === String(academicYear)
     );
-  }, [docxTemplates, academicYear]);
+  }, [rawTemplates, academicYear]);
 
   async function loadTeachers() {
     if (role !== "admin") return;
@@ -80,12 +80,12 @@ export default function GeneratePage() {
   async function loadYearLists() {
     if (!departmentId) return;
     try {
-      const [ex, dx] = await Promise.all([
+      const [ex, raw] = await Promise.all([
         api.get("/excel/templates", { params: { department_id: departmentId } }),
-        api.get("/docx/templates", { params: { department_id: departmentId } }),
+        api.get("/raw-template/templates", { params: { department_id: departmentId } }),
       ]);
       setExcelTemplates(ex.data || []);
-      setDocxTemplates(dx.data || []);
+      setRawTemplates(raw.data || []);
     } catch (e) {
       console.error(e);
     }
@@ -107,9 +107,7 @@ export default function GeneratePage() {
 
   function makeDownloadLinkFromPath(outputPath) {
     if (!outputPath) return "";
-    return `http://localhost:8000/generate/download?path=${encodeURIComponent(
-      outputPath
-    )}`;
+    return `${getApiBaseUrl()}/generate/download?path=${encodeURIComponent(outputPath)}`;
   }
 
   async function generate() {
@@ -125,8 +123,8 @@ export default function GeneratePage() {
       setStatus("Нет Excel для этого года");
       return;
     }
-    if (!hasDocx) {
-      setStatus("Нет DOCX для этого года");
+    if (!hasRawTemplate) {
+      setStatus("Нет raw шаблона для этого года");
       return;
     }
     if (role === "admin" && !teacherId) {
@@ -182,12 +180,10 @@ export default function GeneratePage() {
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", onVis);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (role === "admin") loadHistory();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teacherId]);
 
   return (
@@ -297,16 +293,15 @@ export default function GeneratePage() {
           </div>
         </div>
 
-        <div
-          className="actions-row"
-          style={{
-            marginBottom: 10,
-          }}
-        >
+        <div className="small" style={{ marginBottom: 12 }}>
+          Excel: {hasExcel ? "есть" : "нет"} | Raw шаблон: {hasRawTemplate ? "есть" : "нет"}
+        </div>
+
+        <div className="actions-row">
           <button
             className="btn btn-primary"
             onClick={generate}
-            disabled={!hasExcel || !hasDocx}
+            disabled={!hasExcel || !hasRawTemplate}
             style={{
               minWidth: 200,
               height: 48,
@@ -321,12 +316,10 @@ export default function GeneratePage() {
         </div>
 
         {downloadUrl ? (
-          <div style={{ marginTop: 14, marginBottom: 10 }}>
+          <div style={{ marginTop: 14 }}>
             <button
               className="btn btn-outline"
-              onClick={() =>
-                window.open(`http://localhost:8000${downloadUrl}`, "_blank", "noreferrer")
-              }
+              onClick={() => window.open(`${getApiBaseUrl()}${downloadUrl}`, "_blank", "noreferrer")}
               style={{
                 borderRadius: 12,
                 minWidth: 180,
