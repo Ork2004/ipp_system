@@ -153,7 +153,7 @@ export default function RawTemplateUploadPage() {
 
       setFile(null);
       setStatus(
-        `Загружено ✅ Таблиц: ${res.data?.tables_count || 0}, ячеек: ${
+        `Загружено, Таблиц: ${res.data?.tables_count || 0}, ячеек: ${
           res.data?.cells_count || 0
         }`
       );

@@ -21,18 +21,28 @@ function downloadBlob(blob, filename) {
   window.URL.revokeObjectURL(url);
 }
 
-const visibleInputStyle = {
+const yearInputStyle = {
   width: 220,
-  height: 48,
+  height: 52,
   borderRadius: 14,
   border: "1px solid #d9e3f5",
   background: "#f8fbff",
   boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
   color: "#17356f",
   WebkitTextFillColor: "#17356f",
-  fontWeight: 600,
+  fontWeight: 700,
+  fontSize: 16,
+  padding: "0 16px",
+  outline: "none",
   opacity: 1,
   caretColor: "#17356f",
+};
+
+const topLabelStyle = {
+  fontSize: 14,
+  fontWeight: 700,
+  color: "#5f7195",
+  marginBottom: 8,
 };
 
 export default function ExcelUploadPage() {
@@ -203,28 +213,33 @@ export default function ExcelUploadPage() {
         <div
           style={{
             display: "flex",
-            gap: 14,
+            gap: 18,
             flexWrap: "wrap",
-            alignItems: "center",
+            alignItems: "flex-end",
             marginBottom: 18,
           }}
         >
-          <input
-            className="input"
-            style={visibleInputStyle}
-            value={academicYear}
-            onChange={(e) => {
-              setAcademicYear(e.target.value);
-              localStorage.setItem("academic_year", e.target.value);
-            }}
-            placeholder="2025-2026"
-          />
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div style={topLabelStyle}>Учебный год</div>
+            <input
+              className="input"
+              style={yearInputStyle}
+              value={academicYear}
+              onChange={(e) => {
+                setAcademicYear(e.target.value);
+                localStorage.setItem("academic_year", e.target.value);
+              }}
+              placeholder="2025-2026"
+            />
+          </div>
 
           <div
             className="small"
             style={{
               color: status ? "#315fcb" : "#7c8aa5",
-              fontWeight: 500,
+              fontWeight: 600,
+              minHeight: 24,
+              paddingBottom: 10,
             }}
           >
             {status}

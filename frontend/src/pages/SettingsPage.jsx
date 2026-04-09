@@ -1,6 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 
+const yearFieldStyle = {
+  width: 220,
+  height: 52,
+  borderRadius: 14,
+  border: "1px solid #d9e3f5",
+  background: "#f8fbff",
+  boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
+  color: "#17356f",
+  fontSize: 16,
+  fontWeight: 700,
+  padding: "0 16px",
+  outline: "none",
+  opacity: 1,
+  WebkitTextFillColor: "#17356f",
+  caretColor: "#17356f",
+};
+
+const topLabelStyle = {
+  fontSize: 14,
+  fontWeight: 700,
+  color: "#5f7195",
+  marginBottom: 8,
+};
+
 export default function SettingsPage() {
   const [departmentId] = useState(
     Number(localStorage.getItem("department_id") || 0)
@@ -60,16 +84,17 @@ export default function SettingsPage() {
       const res = await api.get("/excel/templates", {
         params: { department_id: departmentId },
       });
-      setExcelTemplates(res.data || []);
+      setExcelTemplates(Array.isArray(res.data) ? res.data : []);
     } catch {
       setStatus("Ошибка загрузки Excel");
+      setExcelTemplates([]);
     }
   }
 
   async function loadColumns(exId) {
     try {
       const res = await api.get(`/excel/${exId}/columns`);
-      setCols(res.data || []);
+      setCols(Array.isArray(res.data) ? res.data : []);
     } catch {
       setCols([]);
     }
@@ -88,7 +113,7 @@ export default function SettingsPage() {
       }
 
       const t = await api.get(`/raw-template/${id}/tables`);
-      setTables(t.data?.tables || []);
+      setTables(Array.isArray(t.data?.tables) ? t.data.tables : []);
     } catch {
       setTables([]);
     }
@@ -118,7 +143,7 @@ export default function SettingsPage() {
         academic_year: academicYear,
         config: cfg,
       });
-      setStatus("Сохранено ✅");
+      setStatus("Сохранено");
     } catch {
       setStatus("Ошибка сохранения");
     }
@@ -176,14 +201,22 @@ export default function SettingsPage() {
     }));
   }
 
+  function handleYearChange(value) {
+    setAcademicYear(value);
+    localStorage.setItem("academic_year", value);
+  }
+
   useEffect(() => {
     loadExcelTemplates();
   }, []);
 
   useEffect(() => {
+    localStorage.setItem("academic_year", academicYear);
+
     if (!excelForYear) {
       setCols([]);
       setTables([]);
+      setExcelTemplateId("");
       return;
     }
 
@@ -243,30 +276,27 @@ export default function SettingsPage() {
               display: "flex",
               gap: 14,
               flexWrap: "wrap",
-              alignItems: "center",
+              alignItems: "flex-end",
             }}
           >
-            <input
-              className="input"
-              style={{
-                width: 220,
-                height: 48,
-                borderRadius: 14,
-                border: "1px solid #d9e3f5",
-                background: "#f8fbff",
-                boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
-              }}
-              value={academicYear}
-              onChange={(e) => setAcademicYear(e.target.value)}
-              placeholder="2025-2026"
-            />
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              <div style={topLabelStyle}>Учебный год</div>
+              <input
+                className="input"
+                style={yearFieldStyle}
+                value={academicYear}
+                onChange={(e) => handleYearChange(e.target.value)}
+                placeholder="2025-2026"
+              />
+            </div>
 
             <div
               className="small"
               style={{
                 color: status ? "#315fcb" : "#7c8aa5",
-                fontWeight: 500,
+                fontWeight: 600,
                 minHeight: 20,
+                paddingBottom: 10,
               }}
             >
               {status}
@@ -332,10 +362,7 @@ export default function SettingsPage() {
             gap: 20,
           }}
         >
-          <SectionCard
-            title="Маппинг колонок"
-            subtitle="Выбери нужные колонки из Excel шаблона"
-          >
+          <SectionCard title="Маппинг колонок">
             <div
               style={{
                 display: "grid",
@@ -366,10 +393,7 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
-          <SectionCard
-            title="Типы занятий"
-            subtitle="Ключевые слова для определения категорий"
-          >
+          <SectionCard title="Типы занятий">
             <div
               style={{
                 display: "grid",
@@ -390,10 +414,7 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
-          <SectionCard
-            title="Правила объединения"
-            subtitle="Настройка ключевых полей для merge логики"
-          >
+          <SectionCard title="Правила объединения">
             <div
               style={{
                 display: "grid",
@@ -408,10 +429,7 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
-          <SectionCard
-            title="Привязка таблиц"
-            subtitle="Какие таблицы из raw template использовать в генерации"
-          >
+          <SectionCard title="Привязка таблиц">
             <div
               style={{
                 display: "grid",
@@ -457,22 +475,24 @@ function SectionCard({ title, subtitle, children }) {
             fontWeight: 800,
             color: "#17356f",
             lineHeight: 1.1,
-            marginBottom: 8,
+            marginBottom: subtitle ? 8 : 0,
             letterSpacing: "-0.02em",
           }}
         >
           {title}
         </div>
 
-        <div
-          style={{
-            color: "#7c8aa5",
-            fontSize: 15,
-            lineHeight: 1.5,
-          }}
-        >
-          {subtitle}
-        </div>
+        {subtitle ? (
+          <div
+            style={{
+              color: "#7c8aa5",
+              fontSize: 15,
+              lineHeight: 1.5,
+            }}
+          >
+            {subtitle}
+          </div>
+        ) : null}
       </div>
 
       {children}

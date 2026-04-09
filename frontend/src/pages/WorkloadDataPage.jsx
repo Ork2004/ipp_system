@@ -1,6 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 
+const yearSelectStyle = {
+  width: 220,
+  height: 52,
+  borderRadius: 14,
+  border: "1px solid #d9e3f5",
+  background: "#f8fbff",
+  boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
+  color: "#17356f",
+  fontSize: 16,
+  fontWeight: 700,
+  padding: "0 16px",
+  outline: "none",
+  opacity: 1,
+  WebkitTextFillColor: "#17356f",
+};
+
+const topLabelStyle = {
+  fontSize: 14,
+  fontWeight: 700,
+  color: "#5f7195",
+  marginBottom: 8,
+};
+
 export default function WorkloadDataPage() {
   const [departmentId, setDepartmentId] = useState(
     Number(localStorage.getItem("department_id") || 0)
@@ -38,18 +61,21 @@ export default function WorkloadDataPage() {
       setStatus("Нет department_id. Выйди и зайди заново.");
       return [];
     }
+
     try {
       setLoadingTemplates(true);
       const res = await api.get("/excel/templates", {
         params: { department_id: depId },
       });
-      const list = res.data || [];
+
+      const list = Array.isArray(res.data) ? res.data : [];
       setTemplates(list);
       setStatus("");
       return list;
     } catch (e) {
       console.error(e);
       setStatus(e?.response?.data?.detail || "Ошибка загрузки списка");
+      setTemplates([]);
       return [];
     } finally {
       setLoadingTemplates(false);
@@ -66,10 +92,11 @@ export default function WorkloadDataPage() {
       const first = await api.get(`/excel/${templateId}/preview`, {
         params: { limit: 50, offset: 0 },
       });
-      const hdrs = first.data.headers || [];
+
+      const hdrs = Array.isArray(first.data?.headers) ? first.data.headers : [];
       setHeaders(hdrs);
 
-      const firstRows = first.data.rows || [];
+      const firstRows = Array.isArray(first.data?.rows) ? first.data.rows : [];
       let allRows = [...firstRows];
 
       const PAGE = 300;
@@ -79,7 +106,8 @@ export default function WorkloadDataPage() {
         const res = await api.get(`/excel/${templateId}/preview`, {
           params: { limit: PAGE, offset },
         });
-        const chunk = res.data.rows || [];
+
+        const chunk = Array.isArray(res.data?.rows) ? res.data.rows : [];
         if (!chunk.length) break;
 
         allRows = allRows.concat(chunk);
@@ -102,12 +130,14 @@ export default function WorkloadDataPage() {
 
   useEffect(() => {
     const dep = Number(localStorage.getItem("department_id") || 0);
+    const year = localStorage.getItem("academic_year") || "2025-2026";
+
     setDepartmentId(dep);
+    setSelectedYear(year);
 
     (async () => {
       await loadTemplates(dep);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -120,7 +150,6 @@ export default function WorkloadDataPage() {
     }
 
     loadPreviewAll(String(templateForYear.id));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedYear, templates]);
 
   return (
@@ -159,38 +188,36 @@ export default function WorkloadDataPage() {
         <div
           style={{
             display: "flex",
-            gap: 14,
+            gap: 18,
             flexWrap: "wrap",
-            alignItems: "center",
+            alignItems: "flex-end",
             marginBottom: 18,
           }}
         >
-          <select
-            className="input"
-            style={{
-              width: 220,
-              height: 48,
-              borderRadius: 14,
-              border: "1px solid #d9e3f5",
-              background: "#f8fbff",
-              boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
-            }}
-            value={selectedYear}
-            onChange={(e) => setSelectedYear(e.target.value)}
-            disabled={loadingTemplates}
-          >
-            {years.map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
-            ))}
-          </select>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div style={topLabelStyle}>Учебный год</div>
+            <select
+              className="input"
+              style={yearSelectStyle}
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              disabled={loadingTemplates}
+            >
+              {years.map((y) => (
+                <option key={y} value={y} style={{ color: "#17356f" }}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          </div>
 
           <div
             className="small"
             style={{
               color: status ? "#315fcb" : "#7c8aa5",
-              fontWeight: 500,
+              fontWeight: 600,
+              minHeight: 24,
+              paddingBottom: 10,
             }}
           >
             {status}
