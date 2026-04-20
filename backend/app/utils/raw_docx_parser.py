@@ -1,5 +1,6 @@
+import hashlib
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from docx import Document
 
@@ -21,6 +22,10 @@ def _normalize_text(value: Any) -> str:
     if value is None:
         return ""
     return re.sub(r"\s+", " ", str(value)).strip()
+
+
+def _normalize_text_lower(value: Any) -> str:
+    return _normalize_text(value).lower()
 
 
 def _is_empty_text(value: Any) -> bool:
@@ -52,28 +57,14 @@ def _cell_signature(text: str) -> str:
 def _build_header_signature(matrix: List[List[dict]], take_rows: int = 2) -> str:
     parts: List[str] = []
     max_rows = min(len(matrix), take_rows)
+
     for r in range(max_rows):
         row_parts = []
         for cell in matrix[r]:
             row_parts.append(_cell_signature(cell.get("text")))
         parts.append("|".join(row_parts))
+
     return " || ".join(parts)
-
-
-def _row_non_empty_count(row: List[dict]) -> int:
-    count = 0
-    for cell in row:
-        if not _is_empty_text(cell.get("text")):
-            count += 1
-    return count
-
-
-def _row_empty_count(row: List[dict]) -> int:
-    count = 0
-    for cell in row:
-        if _is_empty_text(cell.get("text")):
-            count += 1
-    return count
 
 
 def _row_has_total_label(row: List[dict]) -> bool:
@@ -82,13 +73,6 @@ def _row_has_total_label(row: List[dict]) -> bool:
         if text and TOTAL_ROW_RE.search(text):
             return True
     return False
-
-
-def _first_non_empty_cell_index(row: List[dict]) -> Optional[int]:
-    for idx, cell in enumerate(row):
-        if not _is_empty_text(cell.get("text")):
-            return idx
-    return None
 
 
 def _is_probable_loop_template_row(row: List[dict]) -> bool:
@@ -165,7 +149,83 @@ def _find_table_section_title(doc: Document, table_index: int) -> str:
     return f"Таблица {table_index + 1}"
 
 
-def _extract_table_matrix(table, table_index: int) -> List[List[dict]]:
+def _guess_column_hint_text(matrix: List[List[dict]], col_index: int) -> str:
+    if not matrix:
+        return f"Колонка {col_index + 1}"
+
+    for row in matrix[:2]:
+        if col_index >= len(row):
+            continue
+        txt = _normalize_text(row[col_index].get("text"))
+        if txt:
+            return txt
+
+    return f"Колонка {col_index + 1}"
+
+
+def _build_semantic_key(
+    *,
+    section_title: str,
+    table_type: str,
+    header_signature: str,
+    row_index: int,
+    col_index: int,
+    column_hint_text: str,
+) -> str:
+    base = " | ".join([
+        _normalize_text_lower(section_title),
+        _normalize_text_lower(table_type),
+        _normalize_text_lower(header_signature),
+        str(row_index),
+        str(col_index),
+        _normalize_text_lower(column_hint_text),
+    ])
+    return hashlib.sha1(base.encode("utf-8")).hexdigest()
+
+
+def _build_table_fingerprint(
+    *,
+    section_title: str,
+    table_type: str,
+    header_signature: str,
+) -> str:
+    base = " | ".join([
+        _normalize_text_lower(section_title),
+        _normalize_text_lower(table_type),
+        _normalize_text_lower(header_signature),
+    ])
+    return hashlib.sha1(base.encode("utf-8")).hexdigest()
+
+
+def _build_structure_meta(
+    *,
+    section_title: str,
+    table_type: str,
+    header_signature: str,
+    column_hints: List[str],
+    row_count: int,
+    col_count: int,
+    has_total_row: bool,
+) -> Dict[str, Any]:
+    return {
+        "section_title_norm": _normalize_text_lower(section_title),
+        "table_type_norm": _normalize_text_lower(table_type),
+        "header_signature_norm": _normalize_text_lower(header_signature),
+        "column_hints_norm": [_normalize_text_lower(x) for x in (column_hints or [])],
+        "row_count": row_count,
+        "col_count": col_count,
+        "has_total_row": bool(has_total_row),
+    }
+
+
+def _extract_table_matrix(
+    table,
+    table_index: int,
+    *,
+    section_title: str,
+    table_type: str,
+    header_signature: str,
+) -> List[List[dict]]:
     matrix: List[List[dict]] = []
 
     for r_idx, row in enumerate(table.rows):
@@ -173,6 +233,7 @@ def _extract_table_matrix(table, table_index: int) -> List[List[dict]]:
 
         for c_idx, cell in enumerate(row.cells):
             text = _normalize_text(cell.text)
+            column_hint_text = ""
 
             row_cells.append({
                 "row_index": r_idx,
@@ -181,9 +242,26 @@ def _extract_table_matrix(table, table_index: int) -> List[List[dict]]:
                 "is_empty": _is_empty_text(text),
                 "editable": _is_empty_text(text),
                 "cell_key": f"t{table_index}_r{r_idx}_c{c_idx}",
+                "column_hint_text": column_hint_text,
+                "row_signature": f"r{r_idx}",
+                "semantic_key": "",
+                "cell_kind": "text",
             })
 
         matrix.append(row_cells)
+
+    for r_idx, row in enumerate(matrix):
+        for c_idx, cell in enumerate(row):
+            column_hint_text = _guess_column_hint_text(matrix, c_idx)
+            cell["column_hint_text"] = column_hint_text
+            cell["semantic_key"] = _build_semantic_key(
+                section_title=section_title,
+                table_type=table_type,
+                header_signature=header_signature,
+                row_index=r_idx,
+                col_index=c_idx,
+                column_hint_text=column_hint_text,
+            )
 
     return matrix
 
@@ -197,6 +275,9 @@ def _collect_editable_cells(matrix: List[List[dict]]) -> List[dict]:
                     "row_index": cell["row_index"],
                     "col_index": cell["col_index"],
                     "cell_key": cell["cell_key"],
+                    "semantic_key": cell.get("semantic_key"),
+                    "row_signature": cell.get("row_signature"),
+                    "column_hint_text": cell.get("column_hint_text"),
                 })
     return editable
 
@@ -211,6 +292,9 @@ def _collect_prefilled_cells(matrix: List[List[dict]]) -> List[dict]:
                     "col_index": cell["col_index"],
                     "text": cell["text"],
                     "cell_key": cell["cell_key"],
+                    "semantic_key": cell.get("semantic_key"),
+                    "row_signature": cell.get("row_signature"),
+                    "column_hint_text": cell.get("column_hint_text"),
                 })
     return prefilled
 
@@ -230,35 +314,74 @@ def _extract_column_hints(matrix: List[List[dict]]) -> List[str]:
 
     first_row = matrix[0]
     hints: List[str] = []
+
     for idx, cell in enumerate(first_row):
         txt = _normalize_text(cell.get("text"))
         if txt:
             hints.append(txt)
         else:
             hints.append(f"Колонка {idx + 1}")
+
     return hints
 
 
 def scan_raw_docx(file_path: str) -> Dict[str, Any]:
     doc = Document(file_path)
-
     tables_out: List[Dict[str, Any]] = []
 
     for t_idx, table in enumerate(doc.tables):
-        matrix = _extract_table_matrix(table, t_idx)
-        row_count = len(matrix)
-        col_count = max((len(r) for r in matrix), default=0)
-
-        table_type = _guess_table_type(matrix)
-        loop_template_row_index = _extract_loop_template_row_index(matrix)
         section_title = _find_table_section_title(doc, t_idx)
-        header_signature = _build_header_signature(matrix)
-        column_hints = _extract_column_hints(matrix)
+
+        temp_matrix = []
+        for r_idx, row in enumerate(table.rows):
+            row_cells: List[dict] = []
+            for c_idx, cell in enumerate(row.cells):
+                text = _normalize_text(cell.text)
+                row_cells.append({
+                    "row_index": r_idx,
+                    "col_index": c_idx,
+                    "text": text,
+                    "is_empty": _is_empty_text(text),
+                    "editable": _is_empty_text(text),
+                    "cell_key": f"t{t_idx}_r{r_idx}_c{c_idx}",
+                })
+            temp_matrix.append(row_cells)
+
+        row_count = len(temp_matrix)
+        col_count = max((len(r) for r in temp_matrix), default=0)
+
+        table_type = _guess_table_type(temp_matrix)
+        header_signature = _build_header_signature(temp_matrix)
+        column_hints = _extract_column_hints(temp_matrix)
+        has_total_row = any(_row_has_total_label(row) for row in temp_matrix)
+        loop_template_row_index = _extract_loop_template_row_index(temp_matrix)
+
+        table_fingerprint = _build_table_fingerprint(
+            section_title=section_title,
+            table_type=table_type,
+            header_signature=header_signature,
+        )
+
+        structure_meta = _build_structure_meta(
+            section_title=section_title,
+            table_type=table_type,
+            header_signature=header_signature,
+            column_hints=column_hints,
+            row_count=row_count,
+            col_count=col_count,
+            has_total_row=has_total_row,
+        )
+
+        matrix = _extract_table_matrix(
+            table,
+            t_idx,
+            section_title=section_title,
+            table_type=table_type,
+            header_signature=header_signature,
+        )
 
         editable_cells = _collect_editable_cells(matrix)
         prefilled_cells = _collect_prefilled_cells(matrix)
-
-        has_total_row = any(_row_has_total_label(row) for row in matrix)
 
         tables_out.append({
             "table_index": t_idx,
@@ -272,6 +395,8 @@ def scan_raw_docx(file_path: str) -> Dict[str, Any]:
             "column_hints": column_hints,
             "editable_cells_count": len(editable_cells),
             "prefilled_cells_count": len(prefilled_cells),
+            "table_fingerprint": table_fingerprint,
+            "structure_meta": structure_meta,
             "editable_cells": editable_cells,
             "prefilled_cells": prefilled_cells,
             "matrix": matrix,

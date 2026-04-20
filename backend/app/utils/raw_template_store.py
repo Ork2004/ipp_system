@@ -79,9 +79,11 @@ def store_raw_docx_template(
                             column_hints,
                             editable_cells_count,
                             prefilled_cells_count,
+                            table_fingerprint,
+                            structure_meta,
                             extra_meta
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING id;
                         """,
                         (
@@ -97,6 +99,8 @@ def store_raw_docx_template(
                             Json(table_item.get("column_hints", [])),
                             table_item.get("editable_cells_count", 0),
                             table_item.get("prefilled_cells_count", 0),
+                            table_item.get("table_fingerprint"),
+                            Json(table_item.get("structure_meta", {})),
                             Json(
                                 {
                                     "table_index": table_item.get("table_index"),
@@ -122,9 +126,12 @@ def store_raw_docx_template(
                                     is_empty,
                                     is_editable,
                                     cell_kind,
+                                    semantic_key,
+                                    row_signature,
+                                    column_hint_text,
                                     extra_meta
                                 )
-                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
                                 """,
                                 (
                                     raw_table_id,
@@ -135,7 +142,10 @@ def store_raw_docx_template(
                                     cell.get("text"),
                                     cell.get("is_empty", False),
                                     cell.get("editable", False),
-                                    "text",
+                                    cell.get("cell_kind", "text"),
+                                    cell.get("semantic_key"),
+                                    cell.get("row_signature"),
+                                    cell.get("column_hint_text"),
                                     Json({}),
                                 ),
                             )
