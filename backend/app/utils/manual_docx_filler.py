@@ -78,7 +78,41 @@ def _load_raw_template_id(cur, department_id: int, academic_year: str) -> Option
     return row[0] if row else None
 
 
-def _load_manual_static_tables(cur, raw_template_id: int, teacher_id: int) -> List[Dict[str, Any]]:
+def _load_snapshot_map(cur, teacher_id: int, academic_year: str) -> Dict[int, Dict[str, Any]]:
+    cur.execute("""
+        SELECT
+            id,
+            raw_table_id,
+            table_type,
+            source_mode,
+            prefilled_from_snapshot_id
+        FROM teacher_manual_table_snapshots
+        WHERE teacher_id=%s
+          AND academic_year=%s
+        ORDER BY raw_table_id, updated_at DESC, id DESC;
+    """, (teacher_id, academic_year))
+    rows = cur.fetchall() or []
+
+    out: Dict[int, Dict[str, Any]] = {}
+    for r in rows:
+        raw_table_id = int(r[1])
+        if raw_table_id not in out:
+            out[raw_table_id] = {
+                "snapshot_id": int(r[0]),
+                "raw_table_id": raw_table_id,
+                "table_type": r[2],
+                "source_mode": r[3],
+                "prefilled_from_snapshot_id": r[4],
+            }
+    return out
+
+
+def _load_manual_static_tables(
+    cur,
+    raw_template_id: int,
+    teacher_id: int,
+    academic_year: str,
+) -> List[Dict[str, Any]]:
     cur.execute("""
         SELECT
             t.id,
@@ -92,28 +126,38 @@ def _load_manual_static_tables(cur, raw_template_id: int, teacher_id: int) -> Li
           AND t.table_type='static'
         ORDER BY t.table_index;
     """, (raw_template_id,))
-    tables = cur.fetchall()
+    tables = cur.fetchall() or []
 
+    snapshot_map = _load_snapshot_map(cur, teacher_id, academic_year)
     out = []
-    for t in tables:
-        raw_table_id = t[0]
 
-        cur.execute("""
-            SELECT
-                c.id,
-                c.row_index,
-                c.col_index,
-                c.is_editable,
-                v.value_text
-            FROM raw_docx_cells c
-            LEFT JOIN teacher_manual_cell_values v
-              ON v.raw_cell_id = c.id
-             AND v.teacher_id = %s
-            WHERE c.table_id=%s
-              AND c.is_editable = TRUE
-            ORDER BY c.row_index, c.col_index;
-        """, (teacher_id, raw_table_id))
-        vals = cur.fetchall()
+    for t in tables:
+        raw_table_id = int(t[0])
+        snapshot = snapshot_map.get(raw_table_id)
+
+        editable_values = []
+        if snapshot and str(snapshot["table_type"]) == "static":
+            cur.execute("""
+                SELECT
+                    raw_cell_id,
+                    row_index,
+                    col_index,
+                    value_text
+                FROM teacher_manual_static_cell_values
+                WHERE snapshot_id=%s
+                ORDER BY row_index, col_index, id;
+            """, (snapshot["snapshot_id"],))
+            vals = cur.fetchall() or []
+
+            editable_values = [
+                {
+                    "raw_cell_id": v[0],
+                    "row_index": v[1],
+                    "col_index": v[2],
+                    "value": v[3] if v[3] is not None else "",
+                }
+                for v in vals
+            ]
 
         out.append({
             "raw_table_id": raw_table_id,
@@ -122,21 +166,18 @@ def _load_manual_static_tables(cur, raw_template_id: int, teacher_id: int) -> Li
             "table_type": t[3],
             "row_count": t[4],
             "col_count": t[5],
-            "editable_values": [
-                {
-                    "raw_cell_id": v[0],
-                    "row_index": v[1],
-                    "col_index": v[2],
-                    "value": v[4] if v[4] is not None else "",
-                }
-                for v in vals
-            ],
+            "editable_values": editable_values,
         })
 
     return out
 
 
-def _load_manual_loop_tables(cur, raw_template_id: int, teacher_id: int) -> List[Dict[str, Any]]:
+def _load_manual_loop_tables(
+    cur,
+    raw_template_id: int,
+    teacher_id: int,
+    academic_year: str,
+) -> List[Dict[str, Any]]:
     cur.execute("""
         SELECT
             t.id,
@@ -153,45 +194,47 @@ def _load_manual_loop_tables(cur, raw_template_id: int, teacher_id: int) -> List
           AND t.table_type='loop'
         ORDER BY t.table_index;
     """, (raw_template_id,))
-    tables = cur.fetchall()
+    tables = cur.fetchall() or []
 
+    snapshot_map = _load_snapshot_map(cur, teacher_id, academic_year)
     out = []
-    for t in tables:
-        raw_table_id = t[0]
 
-        cur.execute("""
-            SELECT id, row_order
-            FROM teacher_manual_loop_rows
-            WHERE teacher_id=%s
-              AND raw_template_id=%s
-              AND raw_table_id=%s
-            ORDER BY row_order, id;
-        """, (teacher_id, raw_template_id, raw_table_id))
-        loop_rows = cur.fetchall()
+    for t in tables:
+        raw_table_id = int(t[0])
+        snapshot = snapshot_map.get(raw_table_id)
 
         rows_out = []
-        for lr in loop_rows:
-            loop_row_id = lr[0]
-
+        if snapshot and str(snapshot["table_type"]) == "loop":
             cur.execute("""
-                SELECT col_index, value_text
-                FROM teacher_manual_loop_cell_values
-                WHERE loop_row_id=%s
-                ORDER BY col_index;
-            """, (loop_row_id,))
-            vals = cur.fetchall()
+                SELECT id, row_order
+                FROM teacher_manual_loop_rows
+                WHERE snapshot_id=%s
+                ORDER BY row_order, id;
+            """, (snapshot["snapshot_id"],))
+            loop_rows = cur.fetchall() or []
 
-            rows_out.append({
-                "loop_row_id": loop_row_id,
-                "row_order": lr[1],
-                "values": [
-                    {
-                        "col_index": v[0],
-                        "value": v[1] if v[1] is not None else "",
-                    }
-                    for v in vals
-                ],
-            })
+            for lr in loop_rows:
+                loop_row_id = lr[0]
+
+                cur.execute("""
+                    SELECT col_index, value_text
+                    FROM teacher_manual_loop_cell_values
+                    WHERE loop_row_id=%s
+                    ORDER BY col_index, id;
+                """, (loop_row_id,))
+                vals = cur.fetchall() or []
+
+                rows_out.append({
+                    "loop_row_id": loop_row_id,
+                    "row_order": lr[1],
+                    "values": [
+                        {
+                            "col_index": v[0],
+                            "value": v[1] if v[1] is not None else "",
+                        }
+                        for v in vals
+                    ],
+                })
 
         out.append({
             "raw_table_id": raw_table_id,
@@ -260,7 +303,7 @@ def _apply_loop_table_values(doc: Document, table_item: Dict[str, Any]):
 
     inserted_row_indexes = []
 
-    for idx, loop_row in enumerate(loop_rows):
+    for loop_row in loop_rows:
         values_by_col = {
             int(v["col_index"]): v.get("value", "")
             for v in loop_row.get("values", [])
@@ -302,8 +345,18 @@ def apply_manual_fill_to_generated_docx(
             if not raw_template_id:
                 return
 
-            static_tables = _load_manual_static_tables(cur, raw_template_id, teacher_id)
-            loop_tables = _load_manual_loop_tables(cur, raw_template_id, teacher_id)
+            static_tables = _load_manual_static_tables(
+                cur=cur,
+                raw_template_id=raw_template_id,
+                teacher_id=teacher_id,
+                academic_year=academic_year,
+            )
+            loop_tables = _load_manual_loop_tables(
+                cur=cur,
+                raw_template_id=raw_template_id,
+                teacher_id=teacher_id,
+                academic_year=academic_year,
+            )
 
         doc = Document(output_path)
 
