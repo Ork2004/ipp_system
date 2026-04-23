@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend.app.database import get_connection
 from backend.app.api.auth_api import get_current_user
+from backend.app.database import get_connection
 from backend.app.utils.manual_prefill import build_prefill_payload
 
 router = APIRouter(prefix="/manual-fill", tags=["Manual Fill"])
@@ -43,7 +43,11 @@ def _check_teacher_department_access(user: dict, teacher_id: int):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT department_id FROM teachers WHERE id=%s;", (teacher_id,))
+            cur.execute("""
+                SELECT department_id
+                FROM teachers
+                WHERE id=%s;
+            """, (teacher_id,))
             row = cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Преподаватель не найден")
@@ -83,166 +87,7 @@ def _check_template_access(user: dict, raw_template_id: int):
         conn.close()
 
 
-def _load_current_snapshot(cur, teacher_id: int, academic_year: str, raw_table_id: int):
-    cur.execute("""
-        SELECT
-            id,
-            teacher_id,
-            academic_year,
-            raw_template_id,
-            raw_table_id,
-            department_id,
-            section_title,
-            table_type,
-            header_signature,
-            column_hints,
-            table_fingerprint,
-            source_mode,
-            prefilled_from_snapshot_id,
-            created_at,
-            updated_at
-        FROM teacher_manual_table_snapshots
-        WHERE teacher_id=%s
-          AND academic_year=%s
-          AND raw_table_id=%s
-        LIMIT 1;
-    """, (teacher_id, academic_year, raw_table_id))
-    return cur.fetchone()
-
-
-def _load_current_static_values(cur, snapshot_id: int):
-    cur.execute("""
-        SELECT
-            raw_cell_id,
-            row_index,
-            col_index,
-            cell_key,
-            semantic_key,
-            row_signature,
-            column_hint_text,
-            value_text
-        FROM teacher_manual_static_cell_values
-        WHERE snapshot_id=%s
-        ORDER BY row_index, col_index, id;
-    """, (snapshot_id,))
-    rows = cur.fetchall() or []
-
-    return [
-        {
-            "raw_cell_id": r[0],
-            "row_index": r[1],
-            "col_index": r[2],
-            "cell_key": r[3],
-            "semantic_key": r[4],
-            "row_signature": r[5],
-            "column_hint_text": r[6],
-            "value": r[7] if r[7] is not None else "",
-        }
-        for r in rows
-    ]
-
-
-def _load_current_loop_rows(cur, snapshot_id: int):
-    cur.execute("""
-        SELECT id, row_order
-        FROM teacher_manual_loop_rows
-        WHERE snapshot_id=%s
-        ORDER BY row_order, id;
-    """, (snapshot_id,))
-    loop_rows = cur.fetchall() or []
-
-    out = []
-    for lr in loop_rows:
-        loop_row_id = lr[0]
-        row_order = lr[1]
-
-        cur.execute("""
-            SELECT col_index, value_text, column_hint_text, semantic_key
-            FROM teacher_manual_loop_cell_values
-            WHERE loop_row_id=%s
-            ORDER BY col_index, id;
-        """, (loop_row_id,))
-        vals = cur.fetchall() or []
-
-        out.append({
-            "loop_row_id": loop_row_id,
-            "row_order": row_order,
-            "values": [
-                {
-                    "col_index": v[0],
-                    "value": v[1] if v[1] is not None else "",
-                    "column_hint_text": v[2],
-                    "semantic_key": v[3],
-                }
-                for v in vals
-            ]
-        })
-
-    return out
-
-
-def _create_snapshot(
-    cur,
-    *,
-    teacher_id: int,
-    academic_year: str,
-    raw_template_id: int,
-    raw_table_id: int,
-    department_id: int | None,
-    section_title: str,
-    table_type: str,
-    header_signature: str,
-    column_hints,
-    table_fingerprint: str,
-    source_mode: str = "manual",
-    prefilled_from_snapshot_id: int | None = None,
-):
-    cur.execute("""
-        INSERT INTO teacher_manual_table_snapshots(
-            teacher_id,
-            academic_year,
-            raw_template_id,
-            raw_table_id,
-            department_id,
-            section_title,
-            table_type,
-            header_signature,
-            column_hints,
-            table_fingerprint,
-            source_mode,
-            prefilled_from_snapshot_id,
-            created_at,
-            updated_at
-        )
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now(),now())
-        RETURNING id;
-    """, (
-        teacher_id,
-        academic_year,
-        raw_template_id,
-        raw_table_id,
-        department_id,
-        section_title,
-        table_type,
-        header_signature,
-        column_hints,
-        table_fingerprint,
-        source_mode,
-        prefilled_from_snapshot_id,
-    ))
-    return cur.fetchone()[0]
-
-
-def _delete_current_snapshot_if_exists(cur, teacher_id: int, academic_year: str, raw_table_id: int):
-    cur.execute("""
-        DELETE FROM teacher_manual_table_snapshots
-        WHERE teacher_id=%s
-          AND academic_year=%s
-          AND raw_table_id=%s;
-    """, (teacher_id, academic_year, raw_table_id))
-
-
-def _load_raw_table_full(cur, raw_table_id: int):
+def _load_raw_table(cur, raw_table_id: int):
     cur.execute("""
         SELECT
             t.id,
@@ -256,8 +101,6 @@ def _load_raw_table_full(cur, raw_table_id: int):
             t.has_total_row,
             t.loop_template_row_index,
             t.column_hints,
-            t.editable_cells_count,
-            t.prefilled_cells_count,
             t.table_fingerprint,
             t.structure_meta,
             t.extra_meta
@@ -280,11 +123,9 @@ def _load_raw_table_full(cur, raw_table_id: int):
         "has_total_row": row[8],
         "loop_template_row_index": row[9],
         "column_hints": row[10] or [],
-        "editable_cells_count": row[11],
-        "prefilled_cells_count": row[12],
-        "table_fingerprint": row[13],
-        "structure_meta": row[14] or {},
-        "extra_meta": row[15] or {},
+        "table_fingerprint": row[11],
+        "structure_meta": row[12] or {},
+        "extra_meta": row[13] or {},
     }
 
 
@@ -358,6 +199,185 @@ def _load_raw_table_matrix(cur, raw_table_id: int):
 
     matrix = [matrix_map[k] for k in sorted(matrix_map.keys())]
     return matrix, editable_values
+
+
+def _load_current_snapshot(cur, teacher_id: int, academic_year: str, raw_table_id: int):
+    cur.execute("""
+        SELECT
+            id,
+            teacher_id,
+            academic_year,
+            raw_template_id,
+            raw_table_id,
+            department_id,
+            section_title,
+            table_type,
+            header_signature,
+            column_hints,
+            table_fingerprint,
+            source_mode,
+            prefilled_from_snapshot_id,
+            created_at,
+            updated_at
+        FROM teacher_manual_table_snapshots
+        WHERE teacher_id=%s
+          AND academic_year=%s
+          AND raw_table_id=%s
+        LIMIT 1;
+    """, (teacher_id, academic_year, raw_table_id))
+    row = cur.fetchone()
+    if not row:
+        return None
+
+    return {
+        "id": row[0],
+        "teacher_id": row[1],
+        "academic_year": row[2],
+        "raw_template_id": row[3],
+        "raw_table_id": row[4],
+        "department_id": row[5],
+        "section_title": row[6],
+        "table_type": row[7],
+        "header_signature": row[8],
+        "column_hints": row[9] or [],
+        "table_fingerprint": row[10],
+        "source_mode": row[11],
+        "prefilled_from_snapshot_id": row[12],
+        "created_at": row[13],
+        "updated_at": row[14],
+    }
+
+
+def _delete_current_snapshot_if_exists(cur, teacher_id: int, academic_year: str, raw_table_id: int):
+    cur.execute("""
+        DELETE FROM teacher_manual_table_snapshots
+        WHERE teacher_id=%s
+          AND academic_year=%s
+          AND raw_table_id=%s;
+    """, (teacher_id, academic_year, raw_table_id))
+
+
+def _create_snapshot(
+    cur,
+    *,
+    teacher_id: int,
+    academic_year: str,
+    raw_template_id: int,
+    raw_table_id: int,
+    department_id: int | None,
+    section_title: str,
+    table_type: str,
+    header_signature: str,
+    column_hints,
+    table_fingerprint: str,
+    source_mode: str,
+    prefilled_from_snapshot_id: int | None,
+):
+    cur.execute("""
+        INSERT INTO teacher_manual_table_snapshots(
+            teacher_id,
+            academic_year,
+            raw_template_id,
+            raw_table_id,
+            department_id,
+            section_title,
+            table_type,
+            header_signature,
+            column_hints,
+            table_fingerprint,
+            source_mode,
+            prefilled_from_snapshot_id,
+            created_at,
+            updated_at
+        )
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now(),now())
+        RETURNING id;
+    """, (
+        teacher_id,
+        academic_year,
+        raw_template_id,
+        raw_table_id,
+        department_id,
+        section_title,
+        table_type,
+        header_signature,
+        column_hints,
+        table_fingerprint,
+        source_mode,
+        prefilled_from_snapshot_id,
+    ))
+    return cur.fetchone()[0]
+
+
+def _load_current_static_values(cur, snapshot_id: int):
+    cur.execute("""
+        SELECT
+            raw_cell_id,
+            row_index,
+            col_index,
+            cell_key,
+            semantic_key,
+            row_signature,
+            column_hint_text,
+            value_text
+        FROM teacher_manual_static_cell_values
+        WHERE snapshot_id=%s
+        ORDER BY row_index, col_index, id;
+    """, (snapshot_id,))
+    rows = cur.fetchall() or []
+
+    return [
+        {
+            "raw_cell_id": r[0],
+            "row_index": r[1],
+            "col_index": r[2],
+            "cell_key": r[3],
+            "semantic_key": r[4],
+            "row_signature": r[5],
+            "column_hint_text": r[6],
+            "value": r[7] if r[7] is not None else "",
+        }
+        for r in rows
+    ]
+
+
+def _load_current_loop_rows(cur, snapshot_id: int):
+    cur.execute("""
+        SELECT id, row_order
+        FROM teacher_manual_loop_rows
+        WHERE snapshot_id=%s
+        ORDER BY row_order, id;
+    """, (snapshot_id,))
+    loop_rows = cur.fetchall() or []
+
+    out = []
+    for lr in loop_rows:
+        loop_row_id = lr[0]
+        row_order = lr[1]
+
+        cur.execute("""
+            SELECT col_index, value_text, column_hint_text, semantic_key
+            FROM teacher_manual_loop_cell_values
+            WHERE loop_row_id=%s
+            ORDER BY col_index, id;
+        """, (loop_row_id,))
+        vals = cur.fetchall() or []
+
+        out.append({
+            "loop_row_id": loop_row_id,
+            "row_order": row_order,
+            "values": [
+                {
+                    "col_index": v[0],
+                    "value": v[1] if v[1] is not None else "",
+                    "column_hint_text": v[2],
+                    "semantic_key": v[3],
+                }
+                for v in vals
+            ]
+        })
+
+    return out
 
 
 @router.get("/form")
@@ -441,6 +461,8 @@ def get_manual_fill_form(
                     "loop_rows": [],
                 }
 
+                loop_rows_out = []
+
                 if current_snapshot:
                     if table_meta["table_type"] == "static":
                         current_values = _load_current_static_values(cur, current_snapshot["id"])
@@ -457,13 +479,14 @@ def get_manual_fill_form(
                             patched_editable_values.append(patched_item)
 
                         editable_values = patched_editable_values
-
                     else:
                         loop_rows_out = _load_current_loop_rows(cur, current_snapshot["id"])
+
                     source_snapshot_id = current_snapshot["id"]
                     source_academic_year = current_snapshot["academic_year"]
                     source_mode = current_snapshot["source_mode"]
                     prefilled_from_snapshot_id = current_snapshot["prefilled_from_snapshot_id"]
+
                 else:
                     prefill_info = build_prefill_payload(
                         cur,
@@ -484,13 +507,11 @@ def get_manual_fill_form(
                             value = prefill_map.get((int(item["row_index"]), int(item["col_index"])), "")
                             patched_item = dict(item)
                             patched_item["value"] = value
-                            patched_item["from_previous_year"] = (value != "")
+                            patched_item["from_previous_year"] = value != ""
                             patched_editable_values.append(patched_item)
 
                         editable_values = patched_editable_values
-                        loop_rows_out = []
                     else:
-                        loop_rows_out = []
                         for row in (prefill_info.get("loop_rows") or []):
                             loop_rows_out.append({
                                 "loop_row_id": None,
@@ -655,6 +676,23 @@ def save_static_values(
                 saved_count = 0
 
                 for raw_table_id, table_data in grouped_by_table.items():
+                    existing_snapshot = _load_current_snapshot(
+                        cur,
+                        teacher_id=teacher_id,
+                        academic_year=tpl["academic_year"],
+                        raw_table_id=raw_table_id,
+                    )
+
+                    source_mode = "manual"
+                    prefilled_from_snapshot_id = None
+
+                    if existing_snapshot and existing_snapshot.get("source_mode") == "prefilled":
+                        source_mode = "mixed"
+                        prefilled_from_snapshot_id = existing_snapshot.get("prefilled_from_snapshot_id")
+                    elif existing_snapshot and existing_snapshot.get("source_mode") == "mixed":
+                        source_mode = "mixed"
+                        prefilled_from_snapshot_id = existing_snapshot.get("prefilled_from_snapshot_id")
+
                     _delete_current_snapshot_if_exists(
                         cur,
                         teacher_id=teacher_id,
@@ -674,8 +712,8 @@ def save_static_values(
                         header_signature=table_data["header_signature"],
                         column_hints=table_data["column_hints"],
                         table_fingerprint=table_data["table_fingerprint"],
-                        source_mode="manual",
-                        prefilled_from_snapshot_id=None,
+                        source_mode=source_mode,
+                        prefilled_from_snapshot_id=prefilled_from_snapshot_id,
                     )
 
                     for cell in table_data["cells"]:
@@ -739,7 +777,7 @@ def add_loop_row(
     try:
         with conn:
             with conn.cursor() as cur:
-                raw_table = _load_raw_table_full(cur, int(raw_table_id))
+                raw_table = _load_raw_table(cur, int(raw_table_id))
 
                 if int(raw_table["template_id"]) != int(raw_template_id):
                     raise HTTPException(status_code=400, detail="Таблица не принадлежит этому raw_template")
@@ -831,7 +869,8 @@ def save_loop_row(
                         lr.id,
                         s.teacher_id,
                         s.id,
-                        s.source_mode
+                        s.source_mode,
+                        s.prefilled_from_snapshot_id
                     FROM teacher_manual_loop_rows lr
                     JOIN teacher_manual_table_snapshots s ON s.id = lr.snapshot_id
                     WHERE lr.id=%s;
@@ -840,7 +879,7 @@ def save_loop_row(
                 if not row:
                     raise HTTPException(status_code=404, detail="Loop строка не найдена")
 
-                _, snapshot_teacher_id, snapshot_id, source_mode = row
+                _, snapshot_teacher_id, snapshot_id, source_mode, prefilled_from_snapshot_id = row
 
                 if int(snapshot_teacher_id) != int(teacher_id):
                     raise HTTPException(status_code=403, detail="Нельзя сохранять чужую loop строку")
@@ -888,18 +927,23 @@ def save_loop_row(
                     WHERE id=%s;
                 """, (loop_row_id,))
 
+                next_source_mode = "manual"
                 if source_mode == "prefilled":
-                    cur.execute("""
-                        UPDATE teacher_manual_table_snapshots
-                        SET source_mode='mixed', updated_at=now()
-                        WHERE id=%s;
-                    """, (snapshot_id,))
-                else:
-                    cur.execute("""
-                        UPDATE teacher_manual_table_snapshots
-                        SET updated_at=now()
-                        WHERE id=%s;
-                    """, (snapshot_id,))
+                    next_source_mode = "mixed"
+                elif source_mode == "mixed":
+                    next_source_mode = "mixed"
+
+                cur.execute("""
+                    UPDATE teacher_manual_table_snapshots
+                    SET source_mode=%s,
+                        prefilled_from_snapshot_id=%s,
+                        updated_at=now()
+                    WHERE id=%s;
+                """, (
+                    next_source_mode,
+                    prefilled_from_snapshot_id,
+                    snapshot_id,
+                ))
 
         return {
             "status": "ok",
@@ -940,7 +984,10 @@ def delete_loop_row(
                 if int(row[1]) != int(teacher_id):
                     raise HTTPException(status_code=403, detail="Нельзя удалять чужую loop строку")
 
-                cur.execute("DELETE FROM teacher_manual_loop_rows WHERE id=%s;", (loop_row_id,))
+                cur.execute("""
+                    DELETE FROM teacher_manual_loop_rows
+                    WHERE id=%s;
+                """, (loop_row_id,))
 
         return {
             "status": "ok",
