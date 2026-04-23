@@ -29,7 +29,7 @@ const labelStyle = {
   marginBottom: 8,
 };
 
-function tempLoopRowId() {
+function makeTempLoopRowId() {
   return `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
@@ -57,14 +57,14 @@ export default function ManualTablesPage() {
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const [savingStatic, setSavingStatic] = useState(false);
+  const [savingStaticTableId, setSavingStaticTableId] = useState(0);
   const [openTableIds, setOpenTableIds] = useState({});
   const [formValues, setFormValues] = useState({});
   const [loopValues, setLoopValues] = useState({});
   const [tableLoopRows, setTableLoopRows] = useState({});
   const [savingLoopRowId, setSavingLoopRowId] = useState("");
-  const [addingLoopTableId, setAddingLoopTableId] = useState(0);
   const [deletingLoopRowId, setDeletingLoopRowId] = useState("");
+  const [addingLoopTableId, setAddingLoopTableId] = useState(0);
 
   const groupedSections = useMemo(() => {
     const map = new Map();
@@ -147,35 +147,24 @@ export default function ManualTablesPage() {
 
       if (table.table_type === "loop") {
         const rows = Array.isArray(table.loop_rows) ? table.loop_rows : [];
-        nextTableLoopRows[table.id] = rows.map((r) => ({
-          loop_row_id: r.loop_row_id ?? tempLoopRowId(),
-          row_order: r.row_order,
-          isPrefilled: !r.loop_row_id,
-          isNew: !r.loop_row_id,
-          values: Array.isArray(r.values) ? r.values : [],
-        }));
 
-        for (const row of rows) {
-          const actualRowId = row.loop_row_id ?? null;
-          const tempId = actualRowId ?? tempLoopRowId();
+        nextTableLoopRows[table.id] = rows.map((row) => {
+          const rowId = row.loop_row_id || makeTempLoopRowId();
+          nextLoopValues[rowId] = {};
 
-          if (!actualRowId) {
-            const found = nextTableLoopRows[table.id].find(
-              (x) => x.row_order === row.row_order && !x.loop_row_id
-            );
-            if (found) {
-              nextLoopValues[found.loop_row_id] = {};
-              for (const v of row.values || []) {
-                nextLoopValues[found.loop_row_id][v.col_index] = v.value ?? "";
-              }
-            }
-          } else {
-            nextLoopValues[tempId] = {};
-            for (const v of row.values || []) {
-              nextLoopValues[tempId][v.col_index] = v.value ?? "";
-            }
+          for (const valueItem of row.values || []) {
+            nextLoopValues[rowId][valueItem.col_index] = valueItem.value ?? "";
           }
-        }
+
+          return {
+            loop_row_id: rowId,
+            persisted_loop_row_id: row.loop_row_id || null,
+            row_order: row.row_order,
+            isNew: !row.loop_row_id,
+            isPrefilled: !!(row.values || []).some((v) => v.from_previous_year),
+            values: row.values || [],
+          };
+        });
       }
     }
 
@@ -350,9 +339,23 @@ export default function ManualTablesPage() {
     }));
   }
 
+  function getLoopRowValue(loopRowId, colIndex) {
+    return loopValues?.[loopRowId]?.[colIndex] ?? "";
+  }
+
+  function setLoopRowValue(loopRowId, colIndex, value) {
+    setLoopValues((prev) => ({
+      ...prev,
+      [loopRowId]: {
+        ...(prev[loopRowId] || {}),
+        [colIndex]: value,
+      },
+    }));
+  }
+
   async function saveStaticTable(table) {
     try {
-      setSavingStatic(true);
+      setSavingStaticTableId(table.id);
       setStatus("Сохранение...");
 
       const values = (table.editable_values || []).map((item) => ({
@@ -372,94 +375,89 @@ export default function ManualTablesPage() {
       console.error(e);
       setStatus(e?.response?.data?.detail || "Ошибка сохранения");
     } finally {
-      setSavingStatic(false);
+      setSavingStaticTableId(0);
     }
   }
 
-  function getLoopRowValue(loopRowId, colIndex) {
-    return loopValues?.[loopRowId]?.[colIndex] ?? "";
-  }
-
-  function setLoopRowValue(loopRowId, colIndex, value) {
-    setLoopValues((prev) => ({
-      ...prev,
-      [loopRowId]: {
-        ...(prev[loopRowId] || {}),
-        [colIndex]: value,
-      },
-    }));
-  }
-
   async function addLoopRow(table) {
-    const tmpId = tempLoopRowId();
+    try {
+      setAddingLoopTableId(table.id);
 
-    setTableLoopRows((prev) => {
-      const currentRows = Array.isArray(prev[table.id]) ? prev[table.id] : [];
-      const nextOrder =
+      const currentRows = Array.isArray(tableLoopRows[table.id])
+        ? tableLoopRows[table.id]
+        : [];
+
+      const nextRowOrder =
         currentRows.length > 0
           ? Math.max(...currentRows.map((r) => Number(r.row_order) || 0)) + 1
           : 1;
 
-      return {
+      const tmpId = makeTempLoopRowId();
+
+      setTableLoopRows((prev) => ({
         ...prev,
         [table.id]: [
-          ...currentRows,
+          ...(prev[table.id] || []),
           {
             loop_row_id: tmpId,
-            row_order: nextOrder,
-            isPrefilled: false,
+            persisted_loop_row_id: null,
+            row_order: nextRowOrder,
             isNew: true,
+            isPrefilled: false,
             values: [],
           },
         ],
-      };
-    });
+      }));
 
-    setLoopValues((prev) => ({
-      ...prev,
-      [tmpId]: {},
-    }));
+      setLoopValues((prev) => ({
+        ...prev,
+        [tmpId]: {},
+      }));
+
+      setStatus("Строка добавлена");
+    } catch (e) {
+      console.error(e);
+      setStatus("Ошибка добавления строки");
+    } finally {
+      setAddingLoopTableId(0);
+    }
   }
 
-  async function ensureServerLoopRow(tableId, row) {
-    if (!row?.isNew) return row.loop_row_id;
+  async function ensurePersistedLoopRow(table, row) {
+    if (row.persisted_loop_row_id) {
+      return row.persisted_loop_row_id;
+    }
 
-    const response = await api.post("/manual-fill/add-loop-row", {
+    const res = await api.post("/manual-fill/add-loop-row", {
       raw_template_id: rawTemplateId,
-      raw_table_id: tableId,
+      raw_table_id: table.id,
       teacher_id: role === "admin" ? teacherId : undefined,
     });
 
-    const newLoopRowId = response.data?.loop_row_id;
+    const newLoopRowId = res.data?.loop_row_id;
     if (!newLoopRowId) {
       throw new Error("Не удалось создать строку на сервере");
     }
 
-    const oldRowId = row.loop_row_id;
+    const oldClientId = row.loop_row_id;
 
-    setTableLoopRows((prev) => {
-      const rows = Array.isArray(prev[tableId]) ? prev[tableId] : [];
-      return {
-        ...prev,
-        [tableId]: rows.map((r) =>
-          r.loop_row_id === oldRowId
-            ? {
-                ...r,
-                loop_row_id: newLoopRowId,
-                isNew: false,
-              }
-            : r
-        ),
-      };
-    });
+    setTableLoopRows((prev) => ({
+      ...prev,
+      [table.id]: (prev[table.id] || []).map((r) =>
+        r.loop_row_id === oldClientId
+          ? {
+              ...r,
+              persisted_loop_row_id: newLoopRowId,
+              isNew: false,
+            }
+          : r
+      ),
+    }));
 
-    setLoopValues((prev) => {
-      const oldValues = prev[oldRowId] || {};
-      const next = { ...prev };
-      next[newLoopRowId] = oldValues;
-      delete next[oldRowId];
-      return next;
-    });
+    setLoopValues((prev) => ({
+      ...prev,
+      [newLoopRowId]: prev[oldClientId] || {},
+    }));
 
     return newLoopRowId;
   }
@@ -469,22 +467,17 @@ export default function ManualTablesPage() {
       setSavingLoopRowId(String(row.loop_row_id));
       setStatus("Сохранение строки...");
 
-      let actualLoopRowId = row.loop_row_id;
+      const actualLoopRowId = await ensurePersistedLoopRow(table, row);
 
-      if (row.isNew) {
-        actualLoopRowId = await ensureServerLoopRow(table.id, row);
-      }
-
-      const values = [];
-      for (let i = 0; i < Number(table.col_count || 0); i += 1) {
-        values.push({
-          col_index: i,
-          value: getLoopRowValue(actualLoopRowId, i),
+      const values = Array.from({ length: Number(table.col_count || 0) }).map(
+        (_, colIndex) => ({
+          col_index: colIndex,
+          value: getLoopRowValue(actualLoopRowId, colIndex),
           column_hint_text:
-            table.column_hints?.[i] || `Колонка ${i + 1}`,
+            table.column_hints?.[colIndex] || `Колонка ${colIndex + 1}`,
           semantic_key: null,
-        });
-      }
+        })
+      );
 
       await api.post("/manual-fill/save-loop-row", {
         teacher_id: role === "admin" ? teacherId : undefined,
@@ -496,7 +489,9 @@ export default function ManualTablesPage() {
       await loadForm(rawTemplateId, teacherId);
     } catch (e) {
       console.error(e);
-      setStatus(e?.response?.data?.detail || e.message || "Ошибка сохранения строки");
+      setStatus(
+        e?.response?.data?.detail || e?.message || "Ошибка сохранения строки"
+      );
     } finally {
       setSavingLoopRowId("");
     }
@@ -510,14 +505,13 @@ export default function ManualTablesPage() {
       setDeletingLoopRowId(String(row.loop_row_id));
       setStatus("Удаление строки...");
 
-      if (row.isNew) {
-        setTableLoopRows((prev) => {
-          const rows = Array.isArray(prev[tableId]) ? prev[tableId] : [];
-          return {
-            ...prev,
-            [tableId]: rows.filter((r) => r.loop_row_id !== row.loop_row_id),
-          };
-        });
+      if (!row.persisted_loop_row_id) {
+        setTableLoopRows((prev) => ({
+          ...prev,
+          [tableId]: (prev[tableId] || []).filter(
+            (r) => r.loop_row_id !== row.loop_row_id
+          ),
+        }));
 
         setLoopValues((prev) => {
           const next = { ...prev };
@@ -529,7 +523,7 @@ export default function ManualTablesPage() {
         return;
       }
 
-      await api.delete(`/manual-fill/loop-row/${row.loop_row_id}`, {
+      await api.delete(`/manual-fill/loop-row/${row.persisted_loop_row_id}`, {
         params: {
           teacher_id: role === "admin" ? teacherId : undefined,
         },
@@ -771,7 +765,7 @@ export default function ManualTablesPage() {
                           <button
                             className="btn btn-primary"
                             onClick={() => saveStaticTable(table)}
-                            disabled={savingStatic}
+                            disabled={savingStaticTableId === table.id}
                             style={{
                               minWidth: 150,
                               height: 46,
@@ -780,7 +774,9 @@ export default function ManualTablesPage() {
                               boxShadow: "0 12px 24px rgba(58,110,255,0.18)",
                             }}
                           >
-                            {savingStatic ? "Сохранение..." : "Сохранить"}
+                            {savingStaticTableId === table.id
+                              ? "Сохранение..."
+                              : "Сохранить"}
                           </button>
                         </div>
                       </>
@@ -1178,10 +1174,13 @@ function LoopTableEditor({
 
                         <input
                           className="input"
-                          value={getLoopRowValue(row.loop_row_id, colIndex)}
+                          value={getLoopRowValue(
+                            row.persisted_loop_row_id || row.loop_row_id,
+                            colIndex
+                          )}
                           onChange={(e) =>
                             setLoopRowValue(
-                              row.loop_row_id,
+                              row.persisted_loop_row_id || row.loop_row_id,
                               colIndex,
                               e.target.value
                             )
