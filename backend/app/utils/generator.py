@@ -188,6 +188,8 @@ def _get_raw_tables(cur, raw_template_id: int) -> Dict[int, Dict[str, Any]]:
             column_hints,
             editable_cells_count,
             prefilled_cells_count,
+            table_fingerprint,
+            structure_meta,
             extra_meta
         FROM raw_docx_tables
         WHERE template_id = %s
@@ -210,7 +212,9 @@ def _get_raw_tables(cur, raw_template_id: int) -> Dict[int, Dict[str, Any]]:
             "column_hints": r[9] or [],
             "editable_cells_count": int(r[10] or 0),
             "prefilled_cells_count": int(r[11] or 0),
-            "extra_meta": r[12] or {},
+            "table_fingerprint": r[12] or "",
+            "structure_meta": r[13] or {},
+            "extra_meta": r[14] or {},
         }
     return out
 
@@ -474,6 +478,81 @@ def _render_teaching_load_for_kind(
         )
 
 
+def _render_all_teaching_loads(
+    doc: Document,
+    raw_tables: Dict[int, Dict[str, Any]],
+    settings_cfg: Dict[str, Any],
+    context: Dict[str, Any],
+):
+    _render_teaching_load_for_kind(
+        doc=doc,
+        raw_tables=raw_tables,
+        settings_cfg=settings_cfg,
+        context=context,
+        load_kind="staff",
+    )
+
+    _render_teaching_load_for_kind(
+        doc=doc,
+        raw_tables=raw_tables,
+        settings_cfg=settings_cfg,
+        context=context,
+        load_kind="hourly",
+    )
+
+
+def _build_output_path(teacher: Dict[str, Any], academic_year: str) -> str:
+    safe_teacher_name = _safe_name(teacher["full_name"]) or f"teacher_{teacher['id']}"
+    return str((Path(GENERATED_DIR) / f"IPP_{safe_teacher_name}_{academic_year}.docx").resolve())
+
+
+def _load_generation_dependencies(cur, teacher_id: int, department_id: int, academic_year: str):
+    teacher = _extract_teacher(cur, teacher_id)
+    excel = _get_excel_by_year(cur, department_id, academic_year)
+    raw_template = _get_raw_template_by_year(cur, department_id, academic_year)
+    settings_cfg = _get_settings_for_excel(cur, excel["id"])
+    excel_columns = _get_excel_columns(cur, excel["id"])
+    excel_rows = _get_excel_rows(cur, excel["id"])
+    raw_tables = _get_raw_tables(cur, raw_template["id"])
+
+    return {
+        "teacher": teacher,
+        "excel": excel,
+        "raw_template": raw_template,
+        "settings_cfg": settings_cfg,
+        "excel_columns": excel_columns,
+        "excel_rows": excel_rows,
+        "raw_tables": raw_tables,
+    }
+
+
+def _build_generation_context(deps: Dict[str, Any]) -> Dict[str, Any]:
+    return _build_excel_context(
+        teacher=deps["teacher"],
+        excel_columns=deps["excel_columns"],
+        excel_rows=deps["excel_rows"],
+        settings_cfg=deps["settings_cfg"],
+    )
+
+
+def _render_generated_doc(
+    raw_template_path: str,
+    raw_tables: Dict[int, Dict[str, Any]],
+    settings_cfg: Dict[str, Any],
+    context: Dict[str, Any],
+) -> Document:
+    doc = Document(raw_template_path)
+
+    _render_all_teaching_loads(
+        doc=doc,
+        raw_tables=raw_tables,
+        settings_cfg=settings_cfg,
+        context=context,
+    )
+
+    return doc
+
+
 def generate_docx_for_teacher(
     teacher_id: int,
     department_id: int,
@@ -482,42 +561,23 @@ def generate_docx_for_teacher(
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            teacher = _extract_teacher(cur, teacher_id)
-            excel = _get_excel_by_year(cur, department_id, academic_year)
-            raw_template = _get_raw_template_by_year(cur, department_id, academic_year)
-            settings_cfg = _get_settings_for_excel(cur, excel["id"])
-            excel_columns = _get_excel_columns(cur, excel["id"])
-            excel_rows = _get_excel_rows(cur, excel["id"])
-            raw_tables = _get_raw_tables(cur, raw_template["id"])
+            deps = _load_generation_dependencies(
+                cur=cur,
+                teacher_id=teacher_id,
+                department_id=department_id,
+                academic_year=academic_year,
+            )
 
-        context = _build_excel_context(
-            teacher=teacher,
-            excel_columns=excel_columns,
-            excel_rows=excel_rows,
-            settings_cfg=settings_cfg,
-        )
+        context = _build_generation_context(deps)
 
-        doc = Document(raw_template["file_path"])
-
-        _render_teaching_load_for_kind(
-            doc=doc,
-            raw_tables=raw_tables,
-            settings_cfg=settings_cfg,
+        doc = _render_generated_doc(
+            raw_template_path=deps["raw_template"]["file_path"],
+            raw_tables=deps["raw_tables"],
+            settings_cfg=deps["settings_cfg"],
             context=context,
-            load_kind="staff",
         )
 
-        _render_teaching_load_for_kind(
-            doc=doc,
-            raw_tables=raw_tables,
-            settings_cfg=settings_cfg,
-            context=context,
-            load_kind="hourly",
-        )
-
-        safe_teacher_name = _safe_name(teacher["full_name"]) or f"teacher_{teacher_id}"
-        output_path = str((Path(GENERATED_DIR) / f"IPP_{safe_teacher_name}_{academic_year}.docx").resolve())
-
+        output_path = _build_output_path(deps["teacher"], academic_year)
         doc.save(output_path)
 
         apply_manual_fill_to_generated_docx(
