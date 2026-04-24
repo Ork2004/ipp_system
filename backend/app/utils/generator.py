@@ -8,7 +8,11 @@ from docx import Document
 from backend.app.config import GENERATED_DIR
 from backend.app.database import get_connection
 from backend.app.utils.manual_docx_filler import apply_manual_fill_to_generated_docx
-from backend.app.utils.teaching_load import build_teaching_load_context
+from backend.app.utils.teaching_load import (
+    build_teaching_load_context,
+    build_teaching_load_summary,
+    is_teaching_load_summary_raw_table,
+)
 
 
 TOTAL_TEXT_VARIANTS = ("итого", "итог", "total", "всего", "барлығы")
@@ -45,6 +49,21 @@ PAYLOAD_FIELDS = (
     "other_work",
     "itogo",
 )
+SUMMARY_TABLE_COLUMN_MAP = {
+    "l": 1,
+    "spz": 2,
+    "lz": 3,
+    "srsp": 4,
+    "rk_1_2": 5,
+    "ekzameny": 6,
+    "class_hours": 7,
+    "practika": 8,
+    "research_work": 9,
+    "diploma_supervision": 10,
+    "other_work": 11,
+    "office_hours": 12,
+    "itogo": 13,
+}
 
 
 def _normalize_text(value: Any) -> str:
@@ -534,6 +553,95 @@ def _sum_scope_rows(rows: List[Dict[str, Any]]) -> Dict[str, float]:
     return totals
 
 
+def _resolve_teaching_load_summary_raw_table(
+    raw_tables: Dict[int, Dict[str, Any]],
+    settings_cfg: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    template_bindings = (settings_cfg or {}).get("template_bindings") or {}
+    direct_binding = template_bindings.get("teaching_load_summary") or {}
+    nested_binding = (template_bindings.get("teaching_load") or {}).get("summary") or {}
+
+    for binding in (nested_binding, direct_binding):
+        raw_table_id = (binding or {}).get("raw_table_id")
+        if not raw_table_id:
+            continue
+        raw_table = raw_tables.get(int(raw_table_id))
+        if raw_table:
+            return raw_table
+
+    summary_tables = [
+        raw_table
+        for raw_table in (raw_tables or {}).values()
+        if is_teaching_load_summary_raw_table(raw_table)
+    ]
+    if not summary_tables:
+        return None
+
+    summary_tables.sort(key=lambda item: int(item.get("table_index") or 0))
+    return summary_tables[0]
+
+
+def _find_summary_row_index(table, *patterns: str) -> Optional[int]:
+    lowered_patterns = tuple(pattern.lower() for pattern in patterns if pattern)
+    for row_index, row in enumerate(table.rows):
+        first_cell_text = _normalize_text(row.cells[0].text if row.cells else "").lower()
+        if not first_cell_text:
+            continue
+        if any(pattern in first_cell_text for pattern in lowered_patterns):
+            return row_index
+    return None
+
+
+def _find_teaching_load_summary_row_indexes(table) -> Dict[str, int]:
+    row_indexes = {
+        "1": _find_summary_row_index(table, "1st term workload", "plan 1 sem"),
+        "2": _find_summary_row_index(table, "2nd term workload", "plan 2 sem"),
+        "annual": _find_summary_row_index(table, "academic year workload", "год.план"),
+    }
+
+    fallback_indexes = {"1": 2, "2": 3, "annual": 4}
+    for key, fallback_index in fallback_indexes.items():
+        if row_indexes.get(key) is None and len(table.rows) > fallback_index:
+            row_indexes[key] = fallback_index
+
+    return {key: value for key, value in row_indexes.items() if value is not None}
+
+
+def _fill_teaching_load_summary_row(table, row_index: int, payload: Dict[str, Any]) -> None:
+    for field_key, col_index in SUMMARY_TABLE_COLUMN_MAP.items():
+        cell = _safe_get_cell(table, row_index, col_index)
+        _set_cell_text(cell, _display_value((payload or {}).get(field_key)))
+
+
+def _render_teaching_load_summary(
+    doc: Document,
+    raw_tables: Dict[int, Dict[str, Any]],
+    settings_cfg: Dict[str, Any],
+    context: Dict[str, Any],
+) -> None:
+    raw_table = _resolve_teaching_load_summary_raw_table(raw_tables, settings_cfg)
+    if not raw_table:
+        return
+
+    table = _safe_get_table(doc, int(raw_table["table_index"]))
+    if table is None:
+        return
+
+    row_indexes = _find_teaching_load_summary_row_indexes(table)
+    if not row_indexes:
+        return
+
+    summary = build_teaching_load_summary((context.get("teaching_load") or {}), load_kind="staff")
+    by_semester = summary.get("by_semester") or {}
+
+    if row_indexes.get("1") is not None:
+        _fill_teaching_load_summary_row(table, row_indexes["1"], by_semester.get("1") or {})
+    if row_indexes.get("2") is not None:
+        _fill_teaching_load_summary_row(table, row_indexes["2"], by_semester.get("2") or {})
+    if row_indexes.get("annual") is not None:
+        _fill_teaching_load_summary_row(table, row_indexes["annual"], summary.get("annual") or {})
+
+
 def _render_teaching_load_for_kind(
     doc: Document,
     raw_tables: Dict[int, Dict[str, Any]],
@@ -611,6 +719,12 @@ def _render_all_teaching_loads(
         settings_cfg=settings_cfg,
         context=context,
         load_kind="hourly",
+    )
+    _render_teaching_load_summary(
+        doc=doc,
+        raw_tables=raw_tables,
+        settings_cfg=settings_cfg,
+        context=context,
     )
 
 
