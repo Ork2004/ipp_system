@@ -1,14 +1,50 @@
 import re
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from docx import Document
 
 from backend.app.config import GENERATED_DIR
 from backend.app.database import get_connection
-from backend.app.utils.blocks import build_block_rows, detect_semester_columns
 from backend.app.utils.manual_docx_filler import apply_manual_fill_to_generated_docx
+from backend.app.utils.teaching_load import build_teaching_load_context
+
+
+TOTAL_TEXT_VARIANTS = ("итого", "итог", "total", "всего", "барлығы")
+NUMERIC_TOTAL_FIELDS = (
+    "l",
+    "spz",
+    "lz",
+    "srsp",
+    "rk_1_2",
+    "ekzameny",
+    "practika",
+    "diploma_supervision",
+    "research_work",
+    "other_work",
+    "itogo",
+)
+PAYLOAD_FIELDS = (
+    "discipline",
+    "op",
+    "group",
+    "course",
+    "academic_period",
+    "credits",
+    "student_count",
+    "l",
+    "spz",
+    "lz",
+    "srsp",
+    "rk_1_2",
+    "ekzameny",
+    "practika",
+    "diploma_supervision",
+    "research_work",
+    "other_work",
+    "itogo",
+)
 
 
 def _normalize_text(value: Any) -> str:
@@ -28,7 +64,7 @@ def _to_str(value: Any) -> str:
 
 
 def _safe_name(value: str) -> str:
-    return re.sub(r"[^0-9A-Za-zА-Яа-я_]+", "_", value).strip("_")
+    return re.sub(r"[^\w]+", "_", str(value or ""), flags=re.UNICODE).strip("_")
 
 
 def _safe_get_table(doc: Document, table_index: int):
@@ -55,10 +91,11 @@ def _clear_row(row):
         cell.text = ""
 
 
-def _clone_row_before(table, row_index: int):
-    tr = table.rows[row_index]._tr
+def _clone_row_before(table, row_index: int, source_row_index: Optional[int] = None):
+    source_index = row_index if source_row_index is None else source_row_index
+    tr = table.rows[source_index]._tr
     new_tr = deepcopy(tr)
-    tr.addprevious(new_tr)
+    table.rows[row_index]._tr.addprevious(new_tr)
     return row_index
 
 
@@ -146,7 +183,7 @@ def _get_settings_for_excel(cur, excel_template_id: int) -> Dict[str, Any]:
     return row[0] or {}
 
 
-def _get_excel_columns(cur, excel_template_id: int) -> List[tuple[str, str]]:
+def _get_excel_columns(cur, excel_template_id: int) -> List[Tuple[str, str]]:
     cur.execute(
         """
         SELECT column_name, header_text
@@ -169,7 +206,7 @@ def _get_excel_rows(cur, excel_template_id: int) -> List[Dict[str, Any]]:
         """,
         (excel_template_id,),
     )
-    return [r[0] for r in cur.fetchall()]
+    return [row[0] for row in cur.fetchall()]
 
 
 def _get_raw_tables(cur, raw_template_id: int) -> Dict[int, Dict[str, Any]]:
@@ -197,144 +234,144 @@ def _get_raw_tables(cur, raw_template_id: int) -> Dict[int, Dict[str, Any]]:
         """,
         (raw_template_id,),
     )
-    out = {}
-    for r in cur.fetchall():
-        out[int(r[0])] = {
-            "id": int(r[0]),
-            "table_index": int(r[1]),
-            "section_title": r[2] or "",
-            "table_type": r[3] or "",
-            "row_count": int(r[4] or 0),
-            "col_count": int(r[5] or 0),
-            "header_signature": r[6] or "",
-            "has_total_row": bool(r[7]),
-            "loop_template_row_index": r[8] if r[8] is None else int(r[8]),
-            "column_hints": r[9] or [],
-            "editable_cells_count": int(r[10] or 0),
-            "prefilled_cells_count": int(r[11] or 0),
-            "table_fingerprint": r[12] or "",
-            "structure_meta": r[13] or {},
-            "extra_meta": r[14] or {},
+    out: Dict[int, Dict[str, Any]] = {}
+    for row in cur.fetchall():
+        out[int(row[0])] = {
+            "id": int(row[0]),
+            "table_index": int(row[1]),
+            "section_title": row[2] or "",
+            "table_type": row[3] or "",
+            "row_count": int(row[4] or 0),
+            "col_count": int(row[5] or 0),
+            "header_signature": row[6] or "",
+            "has_total_row": bool(row[7]),
+            "loop_template_row_index": row[8] if row[8] is None else int(row[8]),
+            "column_hints": row[9] or [],
+            "editable_cells_count": int(row[10] or 0),
+            "prefilled_cells_count": int(row[11] or 0),
+            "table_fingerprint": row[12] or "",
+            "structure_meta": row[13] or {},
+            "extra_meta": row[14] or {},
         }
     return out
 
 
 def _build_excel_context(
     teacher: Dict[str, Any],
-    excel_columns: List[tuple[str, str]],
+    excel_columns: List[Tuple[str, str]],
     excel_rows: List[Dict[str, Any]],
     settings_cfg: Dict[str, Any],
+    academic_year: str,
 ) -> Dict[str, Any]:
-    cols_cfg = (settings_cfg or {}).get("columns") or {}
-
-    teacher_col = cols_cfg.get("teacher_col")
-    staff_hours_col = cols_cfg.get("staff_hours_col")
-    hourly_hours_col = cols_cfg.get("hourly_hours_col")
-
-    if not teacher_col or not staff_hours_col:
-        raise Exception("Настройки неполные: columns.teacher_col и columns.staff_hours_col обязательны")
-
-    col_to_header = {col_name: header_text for col_name, header_text in excel_columns}
-    semester_map = detect_semester_columns(excel_columns)
-
-    if not semester_map:
-        raise Exception("Не найдены колонки семестров в Excel")
-
-    teaching_load = {"staff": {}, "hourly": {}}
-
-    for sem_key in semester_map.keys():
-        staff_loop_key = f"blocks.teaching_load.staff.{sem_key}"
-        hourly_loop_key = f"blocks.teaching_load.hourly.{sem_key}"
-
-        teaching_load["staff"][sem_key] = build_block_rows(
-            loop_key=staff_loop_key,
-            excel_rows=excel_rows,
-            col_to_header=col_to_header,
-            teacher_full_name=teacher["full_name"],
-            teacher_col=teacher_col,
-            semester_map=semester_map,
-            staff_hours_col=staff_hours_col,
-            hourly_hours_col=hourly_hours_col,
-            settings_cfg=settings_cfg,
-        )
-
-        teaching_load["hourly"][sem_key] = build_block_rows(
-            loop_key=hourly_loop_key,
-            excel_rows=excel_rows,
-            col_to_header=col_to_header,
-            teacher_full_name=teacher["full_name"],
-            teacher_col=teacher_col,
-            semester_map=semester_map,
-            staff_hours_col=staff_hours_col,
-            hourly_hours_col=hourly_hours_col,
-            settings_cfg=settings_cfg,
-        )
-
-    return {
-        "teacher": teacher,
-        "teaching_load": teaching_load,
-    }
+    return build_teaching_load_context(
+        teacher=teacher,
+        excel_columns=excel_columns,
+        excel_rows=excel_rows,
+        settings_cfg=settings_cfg,
+        academic_year=academic_year,
+    )
 
 
 def _row_text(table_row) -> str:
-    return " ".join(_normalize_text(c.text).lower() for c in table_row.cells if _normalize_text(c.text)).strip()
+    return " ".join(_normalize_text(cell.text).lower() for cell in table_row.cells if _normalize_text(cell.text)).strip()
 
 
-def _find_semester_segment(table, sem_number: int) -> Optional[Dict[str, int]]:
-    marker_variants = [
-        f"{sem_number} сем.",
-        f"{sem_number} сем",
-        f"{sem_number} семестр",
-        f"{sem_number} sem",
-    ]
-    total_variants = ["итого", "итог", "total", "всего", "барлығы"]
-
-    marker_row_index = None
-
-    for r_idx, row in enumerate(table.rows):
-        txt = _row_text(row)
-        if any(v in txt for v in marker_variants):
-            marker_row_index = r_idx
-            break
-
-    if marker_row_index is None:
-        return None
-
-    total_row_index = None
-    for r_idx in range(marker_row_index + 1, len(table.rows)):
-        txt = _row_text(table.rows[r_idx])
-        if any(v == txt or txt.startswith(v + " ") or v in txt for v in total_variants):
-            total_row_index = r_idx
-            break
-
-    if total_row_index is None:
-        return None
-
-    template_row_index = marker_row_index + 1
-    if template_row_index >= total_row_index:
-        return None
-
-    return {
-        "marker_row_index": marker_row_index,
-        "template_row_index": template_row_index,
-        "total_row_index": total_row_index,
-    }
+def _is_total_text(text: str) -> bool:
+    return any(variant in text for variant in TOTAL_TEXT_VARIANTS)
 
 
-def _guess_column_map(raw_table: Dict[str, Any], settings_cfg: Dict[str, Any]) -> Dict[str, int]:
-    hints = [str(x).strip().lower() for x in (raw_table.get("column_hints") or [])]
-    cols_cfg = (settings_cfg or {}).get("columns") or {}
+def _parse_scope_from_text(text: str) -> tuple[int, ...]:
+    norm = _normalize_text(text).lower()
+    if not norm:
+        return ()
+    if "контроль" in norm and not _is_total_text(norm):
+        return ()
 
-    discipline_key = cols_cfg.get("discipline_col") or "distsiplina"
-    group_key = cols_cfg.get("group_col") or "group_col"
+    match = re.match(r"^\s*(\d+(?:\s*,\s*\d+)*)", norm)
+    if not match:
+        return ()
 
-    out = {}
+    if "сем" not in norm and "sem" not in norm and not re.fullmatch(r"\d+(?:\s*,\s*\d+)*", norm):
+        return ()
+
+    numbers: List[int] = []
+    for part in match.group(1).split(","):
+        try:
+            number = int(part.strip())
+        except Exception:
+            continue
+        if 0 < number <= 12 and number not in numbers:
+            numbers.append(number)
+    return tuple(numbers)
+
+
+def _detect_table_blocks(table, raw_table: Dict[str, Any]) -> List[Dict[str, Any]]:
+    default_insert_start = int(raw_table.get("loop_template_row_index") or 1)
+    rows_meta: List[Dict[str, Any]] = []
+
+    for row_index, row in enumerate(table.rows):
+        text = _row_text(row)
+        scope = _parse_scope_from_text(text)
+        rows_meta.append(
+            {
+                "row_index": row_index,
+                "scope": scope,
+                "is_total": bool(scope and _is_total_text(text)),
+            }
+        )
+
+    total_rows = [item for item in rows_meta if item["is_total"]]
+    blocks: List[Dict[str, Any]] = []
+    prev_total_row_index: Optional[int] = None
+
+    for total_row in total_rows:
+        search_start = default_insert_start if prev_total_row_index is None else prev_total_row_index + 1
+        label_row_index = None
+
+        for candidate in rows_meta:
+            candidate_row_index = int(candidate["row_index"])
+            if candidate_row_index < search_start or candidate_row_index >= int(total_row["row_index"]):
+                continue
+            if candidate["scope"] == total_row["scope"] and not candidate["is_total"]:
+                label_row_index = candidate_row_index
+
+        insert_start = label_row_index + 1 if label_row_index is not None else search_start
+        if insert_start > int(total_row["row_index"]):
+            insert_start = int(total_row["row_index"])
+
+        blocks.append(
+            {
+                "scope": tuple(total_row["scope"]),
+                "scope_key": ",".join(str(x) for x in total_row["scope"]),
+                "label_row_index": label_row_index,
+                "insert_start_row_index": insert_start,
+                "total_row_index": int(total_row["row_index"]),
+            }
+        )
+        prev_total_row_index = int(total_row["row_index"])
+
+    return blocks
+
+
+def _guess_column_map(raw_table: Dict[str, Any]) -> Dict[str, int]:
+    hints = [str(value).strip().lower() for value in (raw_table.get("column_hints") or [])]
+    out: Dict[str, int] = {}
 
     for idx, hint in enumerate(hints):
-        if "наименование" in hint or "subject" in hint or "атауы" in hint:
-            out[discipline_key] = idx
+        if "наименование" in hint or "subject" in hint or "пән" in hint:
+            out["discipline"] = idx
+        elif "образовательная программа" in hint or hint == "оп" or "program" in hint:
+            out["op"] = idx
         elif "группа" in hint or "group" in hint:
-            out[group_key] = idx
+            out["group"] = idx
+        elif "академ" in hint or "period" in hint:
+            out["academic_period"] = idx
+        elif "курс" in hint or hint == "course":
+            out["course"] = idx
+        elif "кредит" in hint:
+            out["credits"] = idx
+        elif "обуча" in hint or "контингент" in hint or "students" in hint:
+            out["student_count"] = idx
         elif "лек" in hint:
             out["l"] = idx
         elif "практ" in hint:
@@ -347,45 +384,43 @@ def _guess_column_map(raw_table: Dict[str, Any], settings_cfg: Dict[str, Any]) -
             out["rk_1_2"] = idx
         elif "экзам" in hint:
             out["ekzameny"] = idx
+        elif "практика" in hint:
+            out["practika"] = idx
+        elif "рук-во дп" in hint or "дп и мд" in hint or "диссертац" in hint:
+            out["diploma_supervision"] = idx
+        elif "нирм" in hint or "нирд" in hint:
+            out["research_work"] = idx
+        elif "двр" in hint or "другой" in hint or "дополнительн" in hint:
+            out["other_work"] = idx
         elif "итого" in hint and "час" in hint:
             out["itogo"] = idx
 
-    if discipline_key not in out and len(hints) > 1:
-        out[discipline_key] = 1
-    if group_key not in out and len(hints) > 2:
-        out[group_key] = 2
-    if "l" not in out and len(hints) > 5:
-        out["l"] = 5
-    if "spz" not in out and len(hints) > 6:
-        out["spz"] = 6
-    if "lz" not in out and len(hints) > 7:
-        out["lz"] = 7
-    if "srsp" not in out and len(hints) > 8:
-        out["srsp"] = 8
-    if "rk_1_2" not in out and len(hints) > 9:
-        out["rk_1_2"] = 9
-    if "ekzameny" not in out and len(hints) > 10:
-        out["ekzameny"] = 10
+    fallback_indexes = {
+        "discipline": 1,
+        "group": 2,
+    }
+
+    for field_key, fallback_index in fallback_indexes.items():
+        if field_key in out:
+            continue
+        if len(hints) > fallback_index:
+            out[field_key] = fallback_index
 
     return out
 
 
-def _build_payload(row_data: Dict[str, Any], settings_cfg: Dict[str, Any]) -> Dict[str, Any]:
-    cols_cfg = (settings_cfg or {}).get("columns") or {}
+def _display_value(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, (int, float)) and abs(float(value)) < 1e-9:
+        return ""
+    return value
 
-    discipline_key = cols_cfg.get("discipline_col") or "distsiplina"
-    group_key = cols_cfg.get("group_col") or "group_col"
 
+def _build_payload(row_data: Dict[str, Any]) -> Dict[str, Any]:
     return {
-        discipline_key: row_data.get(discipline_key, ""),
-        group_key: row_data.get(group_key, ""),
-        "l": row_data.get("l", ""),
-        "spz": row_data.get("spz", ""),
-        "lz": row_data.get("lz", ""),
-        "srsp": row_data.get("srsp", ""),
-        "rk_1_2": row_data.get("rk_1_2", ""),
-        "ekzameny": row_data.get("ekzameny", ""),
-        "itogo": row_data.get("itogo", ""),
+        field_key: _display_value(row_data.get(field_key, ""))
+        for field_key in PAYLOAD_FIELDS
     }
 
 
@@ -397,38 +432,106 @@ def _fill_row_by_map(table, row_index: int, payload: Dict[str, Any], col_map: Di
         _set_cell_text(cell, payload.get(field_key))
 
 
-def _fill_semester_in_single_table(
+def _fill_total_row(table, row_index: int, totals: Dict[str, Any], col_map: Dict[str, int]):
+    payload = {
+        field_key: _display_value(value)
+        for field_key, value in (totals or {}).items()
+    }
+    _fill_row_by_map(
+        table=table,
+        row_index=row_index,
+        payload={field_key: payload.get(field_key, "") for field_key in NUMERIC_TOTAL_FIELDS},
+        col_map=col_map,
+    )
+
+
+def _render_scope_block(
     table,
-    sem_segment: Dict[str, int],
+    block: Dict[str, Any],
     rows_data: List[Dict[str, Any]],
+    totals: Dict[str, Any],
     col_map: Dict[str, int],
-    settings_cfg: Dict[str, Any],
 ):
-    template_row_index = sem_segment["template_row_index"]
-    total_row_index = sem_segment["total_row_index"]
-
-    available_slots = max(total_row_index - template_row_index, 0)
-    if available_slots == 0:
-        return
-
-    payloads = [_build_payload(row, settings_cfg) for row in (rows_data or [])]
+    insert_start_row_index = int(block["insert_start_row_index"])
+    total_row_index = int(block["total_row_index"])
+    available_slots = max(total_row_index - insert_start_row_index, 0)
+    payloads = [_build_payload(row) for row in (rows_data or [])]
 
     if len(payloads) > available_slots:
         need_add = len(payloads) - available_slots
         for _ in range(need_add):
-            _clone_row_before(table, total_row_index)
+            source_row_index = max(insert_start_row_index, total_row_index - 1)
+            _clone_row_before(table, total_row_index, source_row_index=source_row_index)
             total_row_index += 1
 
     for idx, payload in enumerate(payloads):
-        row_index = template_row_index + idx
+        row_index = insert_start_row_index + idx
         if row_index >= total_row_index:
             break
         _clear_row(table.rows[row_index])
         _fill_row_by_map(table, row_index, payload, col_map)
 
-    start_clear = template_row_index + len(payloads)
-    for r_idx in range(start_clear, total_row_index):
-        _clear_row(table.rows[r_idx])
+    start_clear = insert_start_row_index + len(payloads)
+    for row_index in range(start_clear, total_row_index):
+        _clear_row(table.rows[row_index])
+
+    _fill_total_row(table, total_row_index, totals or {}, col_map)
+
+
+def _find_annual_total_row_index(table, last_semester_total_row_index: int) -> Optional[int]:
+    for row_index in range(last_semester_total_row_index + 1, len(table.rows)):
+        text = _row_text(table.rows[row_index])
+        if _is_total_text(text) and not _parse_scope_from_text(text):
+            return row_index
+    return None
+
+
+def _map_scope_rows_to_blocks(
+    rows_by_scope: Dict[str, List[Dict[str, Any]]],
+    blocks: List[Dict[str, Any]],
+    primary_common_scope_key: Optional[str],
+) -> Dict[str, List[Dict[str, Any]]]:
+    mapped: Dict[str, List[Dict[str, Any]]] = {
+        block["scope_key"]: list(rows_by_scope.get(block["scope_key"]) or [])
+        for block in blocks
+    }
+    available_scope_keys = {block["scope_key"] for block in blocks}
+    common_block_keys = [block["scope_key"] for block in blocks if "," in block["scope_key"]]
+
+    for scope_key, rows in (rows_by_scope or {}).items():
+        if scope_key in available_scope_keys:
+            continue
+
+        fallback_scope_key = None
+        if primary_common_scope_key and primary_common_scope_key in available_scope_keys:
+            fallback_scope_key = primary_common_scope_key
+        elif common_block_keys:
+            fallback_scope_key = common_block_keys[-1]
+
+        if not fallback_scope_key:
+            continue
+
+        mapped.setdefault(fallback_scope_key, []).extend(rows)
+
+    for scope_key, rows in mapped.items():
+        rows.sort(key=lambda item: item.get("_row_order") or 0)
+        mapped[scope_key] = rows
+
+    return mapped
+
+
+def _sum_scope_rows(rows: List[Dict[str, Any]]) -> Dict[str, float]:
+    totals = {field_key: 0.0 for field_key in NUMERIC_TOTAL_FIELDS}
+    for row in rows or []:
+        for field_key in NUMERIC_TOTAL_FIELDS:
+            value = row.get(field_key)
+            if value is None:
+                continue
+            try:
+                totals[field_key] += float(value)
+            except Exception:
+                continue
+    return totals
 
 
 def _render_teaching_load_for_kind(
@@ -451,30 +554,41 @@ def _render_teaching_load_for_kind(
     if table is None:
         return
 
-    col_map = _guess_column_map(raw_table, settings_cfg)
-    sem1_segment = _find_semester_segment(table, 1)
-    sem2_segment = _find_semester_segment(table, 2)
+    blocks = _detect_table_blocks(table, raw_table)
+    if not blocks:
+        return
 
-    rows_by_sem = (context.get("teaching_load") or {}).get(load_kind) or {}
-    sem1_rows = rows_by_sem.get("sem1") or []
-    sem2_rows = rows_by_sem.get("sem2") or []
+    col_map = _guess_column_map(raw_table)
+    teaching_load = (context.get("teaching_load") or {})
+    load_context = teaching_load.get(load_kind) or {}
+    rows_by_scope = load_context.get("rows_by_scope") or {}
+    mapped_rows = _map_scope_rows_to_blocks(
+        rows_by_scope=rows_by_scope,
+        blocks=blocks,
+        primary_common_scope_key=teaching_load.get("primary_common_scope_key"),
+    )
 
-    if sem1_segment:
-        _fill_semester_in_single_table(
+    for block in sorted(blocks, key=lambda item: item["total_row_index"], reverse=True):
+        scope_key = block["scope_key"]
+        scope_rows = mapped_rows.get(scope_key) or []
+        _render_scope_block(
             table=table,
-            sem_segment=sem1_segment,
-            rows_data=sem1_rows,
+            block=block,
+            rows_data=scope_rows,
+            totals=_sum_scope_rows(scope_rows),
             col_map=col_map,
-            settings_cfg=settings_cfg,
         )
 
-    if sem2_segment:
-        _fill_semester_in_single_table(
+    annual_total_row_index = _find_annual_total_row_index(
+        table,
+        max(block["total_row_index"] for block in blocks),
+    )
+    if annual_total_row_index is not None:
+        _fill_total_row(
             table=table,
-            sem_segment=sem2_segment,
-            rows_data=sem2_rows,
+            row_index=annual_total_row_index,
+            totals=load_context.get("annual_totals") or {},
             col_map=col_map,
-            settings_cfg=settings_cfg,
         )
 
 
@@ -491,7 +605,6 @@ def _render_all_teaching_loads(
         context=context,
         load_kind="staff",
     )
-
     _render_teaching_load_for_kind(
         doc=doc,
         raw_tables=raw_tables,
@@ -523,6 +636,7 @@ def _load_generation_dependencies(cur, teacher_id: int, department_id: int, acad
         "excel_columns": excel_columns,
         "excel_rows": excel_rows,
         "raw_tables": raw_tables,
+        "academic_year": academic_year,
     }
 
 
@@ -532,6 +646,7 @@ def _build_generation_context(deps: Dict[str, Any]) -> Dict[str, Any]:
         excel_columns=deps["excel_columns"],
         excel_rows=deps["excel_rows"],
         settings_cfg=deps["settings_cfg"],
+        academic_year=deps["academic_year"],
     )
 
 
@@ -542,14 +657,12 @@ def _render_generated_doc(
     context: Dict[str, Any],
 ) -> Document:
     doc = Document(raw_template_path)
-
     _render_all_teaching_loads(
         doc=doc,
         raw_tables=raw_tables,
         settings_cfg=settings_cfg,
         context=context,
     )
-
     return doc
 
 
@@ -588,6 +701,5 @@ def generate_docx_for_teacher(
         )
 
         return output_path
-
     finally:
         conn.close()
