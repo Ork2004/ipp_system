@@ -4,7 +4,10 @@ from typing import Any, Dict, List, Optional
 from docx import Document
 
 from backend.app.database import get_connection
-from backend.app.utils.teaching_load import extract_excel_bound_raw_table_ids
+from backend.app.utils.teaching_load import (
+    extract_excel_bound_raw_table_ids,
+    is_teaching_load_summary_raw_table,
+)
 
 
 def _normalize_text(value: Any) -> str:
@@ -124,6 +127,38 @@ def _load_excel_bound_raw_table_ids(cur, department_id: int, academic_year: str)
     if not row:
         return set()
     return extract_excel_bound_raw_table_ids(row[0] or {})
+
+
+def _load_auto_excel_bound_raw_table_ids(cur, raw_template_id: int) -> set[int]:
+    cur.execute(
+        """
+        SELECT
+            id,
+            table_index,
+            table_type,
+            row_count,
+            col_count,
+            column_hints
+        FROM raw_docx_tables
+        WHERE template_id = %s;
+        """,
+        (raw_template_id,),
+    )
+    out: set[int] = set()
+
+    for row in cur.fetchall() or []:
+        raw_table = {
+            "id": int(row[0]),
+            "table_index": int(row[1] or 0),
+            "table_type": row[2] or "",
+            "row_count": int(row[3] or 0),
+            "col_count": int(row[4] or 0),
+            "column_hints": row[5] or [],
+        }
+        if is_teaching_load_summary_raw_table(raw_table):
+            out.add(int(row[0]))
+
+    return out
 
 
 def _load_manual_static_tables(
@@ -371,6 +406,9 @@ def apply_manual_fill_to_generated_docx(
                 return
 
             excel_bound_raw_table_ids = _load_excel_bound_raw_table_ids(cur, department_id, academic_year)
+            excel_bound_raw_table_ids.update(
+                _load_auto_excel_bound_raw_table_ids(cur, raw_template_id)
+            )
 
             static_tables = _load_manual_static_tables(
                 cur=cur,

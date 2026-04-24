@@ -19,6 +19,20 @@ WORKLOAD_VALUE_FIELDS = (
     "other_work",
     "itogo",
 )
+SUMMARY_CLASS_FIELDS = (
+    "l",
+    "spz",
+    "lz",
+    "srsp",
+    "rk_1_2",
+    "ekzameny",
+)
+SUMMARY_OFFICE_FIELDS = (
+    "practika",
+    "research_work",
+    "diploma_supervision",
+    "other_work",
+)
 ROW_VALUE_FIELDS = (
     "discipline",
     "op",
@@ -177,7 +191,8 @@ def detect_semester_columns(columns: List[Tuple[str, str]]) -> Dict[str, str]:
 
 def extract_excel_bound_raw_table_ids(settings_cfg: Dict[str, Any]) -> set[int]:
     out: set[int] = set()
-    teaching_load_cfg = (((settings_cfg or {}).get("template_bindings") or {}).get("teaching_load") or {})
+    template_bindings = (settings_cfg or {}).get("template_bindings") or {}
+    teaching_load_cfg = template_bindings.get("teaching_load") or {}
 
     for binding in teaching_load_cfg.values():
         raw_table_id = (binding or {}).get("raw_table_id")
@@ -187,7 +202,96 @@ def extract_excel_bound_raw_table_ids(settings_cfg: Dict[str, Any]) -> set[int]:
             except Exception:
                 continue
 
+    teaching_load_summary_cfg = template_bindings.get("teaching_load_summary") or {}
+    raw_table_id = teaching_load_summary_cfg.get("raw_table_id")
+    if raw_table_id:
+        try:
+            out.add(int(raw_table_id))
+        except Exception:
+            pass
+
     return out
+
+
+def is_teaching_load_summary_raw_table(raw_table: Dict[str, Any]) -> bool:
+    hints = [_normalize_text_lower(value) for value in (raw_table.get("column_hints") or [])]
+    if len(hints) < 14:
+        return False
+
+    first_hint = hints[0]
+    last_hint = hints[-1]
+
+    if "teaching workload" not in first_hint:
+        return False
+
+    return any(token in last_hint for token in ("total", "всего", "барлығы"))
+
+
+def _empty_workload_totals() -> Dict[str, float]:
+    return {field_key: 0.0 for field_key in WORKLOAD_VALUE_FIELDS}
+
+
+def _scope_numbers_from_key(scope_key: Any) -> Tuple[int, ...]:
+    numbers: List[int] = []
+    for part in str(scope_key or "").split(","):
+        try:
+            number = int(str(part).strip())
+        except Exception:
+            continue
+        if number not in numbers:
+            numbers.append(number)
+    return tuple(numbers)
+
+
+def _round_num(value: Any) -> float:
+    return round(_to_num(value), 2)
+
+
+def _build_summary_payload(totals: Dict[str, Any]) -> Dict[str, float]:
+    payload = {
+        field_key: _round_num((totals or {}).get(field_key))
+        for field_key in WORKLOAD_VALUE_FIELDS
+    }
+    payload["class_hours"] = round(sum(payload[field_key] for field_key in SUMMARY_CLASS_FIELDS), 2)
+    payload["office_hours"] = round(sum(payload[field_key] for field_key in SUMMARY_OFFICE_FIELDS), 2)
+    payload["itogo"] = round(sum(payload[field_key] for field_key in WORKLOAD_VALUE_FIELDS if field_key != "itogo"), 2)
+    return payload
+
+
+def build_teaching_load_summary(
+    teaching_load: Dict[str, Any],
+    *,
+    load_kind: str = "staff",
+) -> Dict[str, Any]:
+    semesters = [
+        int(sem_num)
+        for sem_num in (teaching_load or {}).get("semesters") or []
+        if str(sem_num).strip().isdigit()
+    ]
+    load_context = ((teaching_load or {}).get(load_kind) or {})
+    distributed_totals = {
+        sem_num: _empty_workload_totals()
+        for sem_num in semesters
+    }
+
+    for scope_key, scope_totals in (load_context.get("totals_by_scope") or {}).items():
+        scope = _scope_numbers_from_key(scope_key)
+        if not scope:
+            continue
+
+        share = 1.0 / len(scope)
+        for sem_num in scope:
+            distributed_totals.setdefault(sem_num, _empty_workload_totals())
+            for field_key in WORKLOAD_VALUE_FIELDS:
+                distributed_totals[sem_num][field_key] += _to_num((scope_totals or {}).get(field_key)) * share
+
+    return {
+        "by_semester": {
+            str(sem_num): _build_summary_payload(distributed_totals.get(sem_num) or {})
+            for sem_num in semesters
+        },
+        "annual": _build_summary_payload(load_context.get("annual_totals") or {}),
+    }
 
 
 def _resolve_column_name(
