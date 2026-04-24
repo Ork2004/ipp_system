@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from backend.app.api.auth_api import get_current_user
 from backend.app.database import get_connection
 from backend.app.utils.manual_prefill import build_prefill_payload
+from backend.app.utils.teaching_load import extract_excel_bound_raw_table_ids
 
 router = APIRouter(prefix="/manual-fill", tags=["Manual Fill"])
 
@@ -380,6 +381,24 @@ def _load_current_loop_rows(cur, snapshot_id: int):
     return out
 
 
+def _load_excel_bound_raw_table_ids(cur, department_id: int, academic_year: str) -> set[int]:
+    cur.execute(
+        """
+        SELECT gs.config
+        FROM generation_settings gs
+        JOIN excel_templates et ON et.id = gs.excel_template_id
+        WHERE et.department_id = %s
+          AND et.academic_year = %s
+        LIMIT 1;
+        """,
+        (department_id, academic_year),
+    )
+    row = cur.fetchone()
+    if not row:
+        return set()
+    return extract_excel_bound_raw_table_ids(row[0] or {})
+
+
 @router.get("/form")
 def get_manual_fill_form(
     raw_template_id: int,
@@ -395,6 +414,11 @@ def get_manual_fill_form(
     try:
         with conn.cursor() as cur:
             tpl = _get_raw_template(cur, raw_template_id)
+            excel_bound_raw_table_ids = _load_excel_bound_raw_table_ids(
+                cur,
+                int(tpl["department_id"]),
+                str(tpl["academic_year"]),
+            )
 
             if user.get("role") == "admin":
                 if int(user.get("department_id") or 0) != int(tpl["department_id"]):
@@ -425,6 +449,7 @@ def get_manual_fill_form(
 
             for t in table_rows:
                 raw_table_id = t[0]
+                is_excel_bound = int(raw_table_id) in excel_bound_raw_table_ids
 
                 table_meta = {
                     "id": raw_table_id,
@@ -463,7 +488,12 @@ def get_manual_fill_form(
 
                 loop_rows_out = []
 
-                if current_snapshot:
+                if is_excel_bound:
+                    source_snapshot_id = None
+                    source_academic_year = None
+                    source_mode = "excel_bound"
+                    prefilled_from_snapshot_id = None
+                elif current_snapshot:
                     if table_meta["table_type"] == "static":
                         current_values = _load_current_static_values(cur, current_snapshot["id"])
                         value_map = {
@@ -550,8 +580,9 @@ def get_manual_fill_form(
                     "matrix": matrix,
                     "editable_values": editable_values,
                     "loop_rows": loop_rows_out,
+                    "excel_bound": is_excel_bound,
                     "prefill": {
-                        "found": bool(prefill_info.get("found")) if not current_snapshot else False,
+                        "found": bool(prefill_info.get("found")) if not current_snapshot and not is_excel_bound else False,
                         "source_snapshot_id": source_snapshot_id,
                         "source_academic_year": source_academic_year,
                         "source_mode": source_mode,

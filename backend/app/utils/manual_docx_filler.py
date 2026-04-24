@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from docx import Document
 
 from backend.app.database import get_connection
+from backend.app.utils.teaching_load import extract_excel_bound_raw_table_ids
 
 
 def _normalize_text(value: Any) -> str:
@@ -107,11 +108,30 @@ def _load_snapshot_map(cur, teacher_id: int, academic_year: str) -> Dict[int, Di
     return out
 
 
+def _load_excel_bound_raw_table_ids(cur, department_id: int, academic_year: str) -> set[int]:
+    cur.execute(
+        """
+        SELECT gs.config
+        FROM generation_settings gs
+        JOIN excel_templates et ON et.id = gs.excel_template_id
+        WHERE et.department_id = %s
+          AND et.academic_year = %s
+        LIMIT 1;
+        """,
+        (department_id, academic_year),
+    )
+    row = cur.fetchone()
+    if not row:
+        return set()
+    return extract_excel_bound_raw_table_ids(row[0] or {})
+
+
 def _load_manual_static_tables(
     cur,
     raw_template_id: int,
     teacher_id: int,
     academic_year: str,
+    excluded_raw_table_ids: set[int],
 ) -> List[Dict[str, Any]]:
     cur.execute("""
         SELECT
@@ -133,6 +153,8 @@ def _load_manual_static_tables(
 
     for t in tables:
         raw_table_id = int(t[0])
+        if raw_table_id in excluded_raw_table_ids:
+            continue
         snapshot = snapshot_map.get(raw_table_id)
 
         editable_values = []
@@ -177,6 +199,7 @@ def _load_manual_loop_tables(
     raw_template_id: int,
     teacher_id: int,
     academic_year: str,
+    excluded_raw_table_ids: set[int],
 ) -> List[Dict[str, Any]]:
     cur.execute("""
         SELECT
@@ -201,6 +224,8 @@ def _load_manual_loop_tables(
 
     for t in tables:
         raw_table_id = int(t[0])
+        if raw_table_id in excluded_raw_table_ids:
+            continue
         snapshot = snapshot_map.get(raw_table_id)
 
         rows_out = []
@@ -345,17 +370,21 @@ def apply_manual_fill_to_generated_docx(
             if not raw_template_id:
                 return
 
+            excel_bound_raw_table_ids = _load_excel_bound_raw_table_ids(cur, department_id, academic_year)
+
             static_tables = _load_manual_static_tables(
                 cur=cur,
                 raw_template_id=raw_template_id,
                 teacher_id=teacher_id,
                 academic_year=academic_year,
+                excluded_raw_table_ids=excel_bound_raw_table_ids,
             )
             loop_tables = _load_manual_loop_tables(
                 cur=cur,
                 raw_template_id=raw_template_id,
                 teacher_id=teacher_id,
                 academic_year=academic_year,
+                excluded_raw_table_ids=excel_bound_raw_table_ids,
             )
 
         doc = Document(output_path)

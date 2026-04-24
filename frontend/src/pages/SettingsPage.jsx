@@ -49,6 +49,12 @@ export default function SettingsPage() {
       activity_type_col: "",
       group_col: "",
       op_col: "",
+      course_col: "",
+      academic_period_col: "",
+      credits_col: "",
+      student_count_col: "",
+      payment_form_col: "",
+      normative_col: "",
     },
     activity_types: {
       lecture: ["лек", "лк", "lecture"],
@@ -389,6 +395,76 @@ export default function SettingsPage() {
                 value={cfg.columns.hourly_hours_col}
                 cols={cols}
                 onChange={(v) => setCol("hourly_hours_col", v)}
+              />
+
+              <SelectRow
+                label="Дисциплина"
+                value={cfg.columns.discipline_col}
+                cols={cols}
+                onChange={(v) => setCol("discipline_col", v)}
+              />
+
+              <SelectRow
+                label="Вид занятий"
+                value={cfg.columns.activity_type_col}
+                cols={cols}
+                onChange={(v) => setCol("activity_type_col", v)}
+              />
+
+              <SelectRow
+                label="Группа"
+                value={cfg.columns.group_col}
+                cols={cols}
+                onChange={(v) => setCol("group_col", v)}
+              />
+
+              <SelectRow
+                label="ОП"
+                value={cfg.columns.op_col}
+                cols={cols}
+                onChange={(v) => setCol("op_col", v)}
+              />
+
+              <SelectRow
+                label="Курс"
+                value={cfg.columns.course_col}
+                cols={cols}
+                onChange={(v) => setCol("course_col", v)}
+              />
+
+              <SelectRow
+                label="Акад. период"
+                value={cfg.columns.academic_period_col}
+                cols={cols}
+                onChange={(v) => setCol("academic_period_col", v)}
+              />
+
+              <SelectRow
+                label="Кредиты"
+                value={cfg.columns.credits_col}
+                cols={cols}
+                onChange={(v) => setCol("credits_col", v)}
+              />
+
+              <SelectRow
+                label="Контингент"
+                value={cfg.columns.student_count_col}
+                cols={cols}
+                onChange={(v) => setCol("student_count_col", v)}
+              />
+
+              <SelectRow
+                label="Форма оплаты"
+                value={cfg.columns.payment_form_col}
+                cols={cols}
+                onChange={(v) => setCol("payment_form_col", v)}
+              />
+
+              <SelectRow
+                label="Норматив"
+                value={cfg.columns.normative_col}
+                cols={cols}
+                onChange={(v) => setCol("normative_col", v)}
               />
             </div>
           </SectionCard>
