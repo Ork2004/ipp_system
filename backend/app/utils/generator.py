@@ -29,6 +29,12 @@ NUMERIC_TOTAL_FIELDS = (
     "other_work",
     "itogo",
 )
+OFFICE_TOTAL_FIELDS = (
+    "practika",
+    "diploma_supervision",
+    "research_work",
+    "other_work",
+)
 PAYLOAD_FIELDS = (
     "discipline",
     "op",
@@ -80,6 +86,17 @@ def _to_str(value: Any) -> str:
             return str(int(value))
         return f"{value:.2f}".rstrip("0").rstrip(".")
     return str(value)
+
+
+def _to_num(value: Any) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).replace(",", ".").strip())
+    except Exception:
+        return 0.0
 
 
 def _safe_name(value: str) -> str:
@@ -553,6 +570,17 @@ def _sum_scope_rows(rows: List[Dict[str, Any]]) -> Dict[str, float]:
     return totals
 
 
+def _annual_office_totals_only(load_context: Dict[str, Any]) -> Dict[str, float]:
+    annual_totals = (load_context or {}).get("annual_totals") or {}
+    totals = {field_key: 0.0 for field_key in NUMERIC_TOTAL_FIELDS}
+
+    for field_key in OFFICE_TOTAL_FIELDS:
+        totals[field_key] = _to_num(annual_totals.get(field_key))
+
+    totals["itogo"] = round(sum(totals[field_key] for field_key in OFFICE_TOTAL_FIELDS), 2)
+    return totals
+
+
 def _resolve_teaching_load_summary_raw_table(
     raw_tables: Dict[int, Dict[str, Any]],
     settings_cfg: Dict[str, Any],
@@ -611,6 +639,73 @@ def _fill_teaching_load_summary_row(table, row_index: int, payload: Dict[str, An
     for field_key, col_index in SUMMARY_TABLE_COLUMN_MAP.items():
         cell = _safe_get_cell(table, row_index, col_index)
         _set_cell_text(cell, _display_value((payload or {}).get(field_key)))
+
+
+def _find_workload_overview_row_indexes(table) -> Dict[str, int]:
+    row_indexes: Dict[str, int] = {}
+
+    for row_index, row in enumerate(table.rows):
+        if len(row.cells) < 8:
+            continue
+
+        activity_text = _normalize_text(row.cells[1].text if len(row.cells) > 1 else "").lower()
+        scope_text = _normalize_text(row.cells[2].text if len(row.cells) > 2 else "").lower()
+        if "teaching workload" not in activity_text:
+            continue
+
+        if "внеаудитор" in scope_text:
+            row_indexes["office"] = row_index
+        elif "аудитор" in scope_text:
+            row_indexes["class"] = row_index
+
+    return row_indexes
+
+
+def _fill_workload_overview_row(
+    table,
+    row_index: int,
+    *,
+    sem1_value: Any,
+    sem2_value: Any,
+    annual_value: Any,
+) -> None:
+    payload = {
+        3: sem1_value,
+        5: sem2_value,
+        7: annual_value,
+    }
+    for col_index, value in payload.items():
+        cell = _safe_get_cell(table, row_index, col_index)
+        _set_cell_text(cell, _display_value(value))
+
+
+def _render_workload_overview_table(doc: Document, context: Dict[str, Any]) -> None:
+    summary = build_teaching_load_summary((context.get("teaching_load") or {}), load_kind="staff")
+    by_semester = summary.get("by_semester") or {}
+    annual = summary.get("annual") or {}
+
+    for table in doc.tables:
+        row_indexes = _find_workload_overview_row_indexes(table)
+        if not row_indexes:
+            continue
+
+        if row_indexes.get("class") is not None:
+            _fill_workload_overview_row(
+                table,
+                row_indexes["class"],
+                sem1_value=(by_semester.get("1") or {}).get("class_hours"),
+                sem2_value=(by_semester.get("2") or {}).get("class_hours"),
+                annual_value=annual.get("class_hours"),
+            )
+        if row_indexes.get("office") is not None:
+            _fill_workload_overview_row(
+                table,
+                row_indexes["office"],
+                sem1_value=(by_semester.get("1") or {}).get("office_hours"),
+                sem2_value=(by_semester.get("2") or {}).get("office_hours"),
+                annual_value=annual.get("office_hours"),
+            )
+        return
 
 
 def _render_teaching_load_summary(
@@ -679,11 +774,16 @@ def _render_teaching_load_for_kind(
     for block in sorted(blocks, key=lambda item: item["total_row_index"], reverse=True):
         scope_key = block["scope_key"]
         scope_rows = mapped_rows.get(scope_key) or []
+        block_totals = _sum_scope_rows(scope_rows)
+        if scope_key == teaching_load.get("primary_common_scope_key") and len(block.get("scope") or ()) > 1:
+            annual_office_totals = _annual_office_totals_only(load_context)
+            if annual_office_totals["itogo"] > _to_num(block_totals.get("itogo")):
+                block_totals = annual_office_totals
         _render_scope_block(
             table=table,
             block=block,
             rows_data=scope_rows,
-            totals=_sum_scope_rows(scope_rows),
+            totals=block_totals,
             col_map=col_map,
         )
 
@@ -724,6 +824,10 @@ def _render_all_teaching_loads(
         doc=doc,
         raw_tables=raw_tables,
         settings_cfg=settings_cfg,
+        context=context,
+    )
+    _render_workload_overview_table(
+        doc=doc,
         context=context,
     )
 

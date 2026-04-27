@@ -88,6 +88,10 @@ DEFAULT_ACTIVITY_TYPES = {
     "lecture": ["лек", "лк", "lecture"],
     "lab_practice": ["лаб", "пра", "lab", "pract"],
 }
+DEFAULT_SUM_COLS_BY_TYPE = {
+    "lecture": ("l", "srsp", "ekzameny"),
+    "lab_practice": ("spz", "lz", "rk_1_2"),
+}
 DEFAULT_SPECIAL_BUCKET_PATTERNS = {
     "practika": ["практик", "practice", "стажировк"],
     "diploma_supervision": [
@@ -467,6 +471,20 @@ def _matches_patterns(value: Any, patterns: List[str]) -> bool:
     return any(_normalize_text_lower(pattern) in text for pattern in (patterns or []))
 
 
+def _detect_activity_group(value: Any, settings_cfg: Dict[str, Any]) -> str:
+    activity_types_cfg = (settings_cfg or {}).get("activity_types") or {}
+    ordered_groups = (
+        ("lecture", activity_types_cfg.get("lecture") or DEFAULT_ACTIVITY_TYPES["lecture"]),
+        ("lab_practice", activity_types_cfg.get("lab_practice") or DEFAULT_ACTIVITY_TYPES["lab_practice"]),
+    )
+
+    for group_key, patterns in ordered_groups:
+        if _matches_patterns(value, list(patterns or [])):
+            return group_key
+
+    return ""
+
+
 def _build_category_text(raw_row: Dict[str, Any], resolved_columns: Dict[str, Optional[str]]) -> str:
     parts = [
         _lookup_value(raw_row, resolved_columns, "discipline_col"),
@@ -486,9 +504,36 @@ def _detect_special_bucket(raw_row: Dict[str, Any], resolved_columns: Dict[str, 
         for key in DEFAULT_SPECIAL_BUCKET_PATTERNS.keys()
     }
 
-    for bucket in ("practika", "research_work", "diploma_supervision", "other_work"):
-        if any(_normalize_text_lower(pattern) in category_text for pattern in merged_patterns.get(bucket, [])):
-            return bucket
+    bucket_tiebreakers = {
+        "research_work": 4,
+        "diploma_supervision": 3,
+        "practika": 2,
+        "other_work": 1,
+    }
+    best_bucket = "other_work"
+    best_score = (0, 0, 0)
+
+    for bucket, patterns in merged_patterns.items():
+        matched_patterns = {
+            normalized_pattern
+            for pattern in (patterns or [])
+            for normalized_pattern in [_normalize_text_lower(pattern)]
+            if normalized_pattern and normalized_pattern in category_text
+        }
+        if not matched_patterns:
+            continue
+
+        score = (
+            len(matched_patterns),
+            max(len(pattern) for pattern in matched_patterns),
+            bucket_tiebreakers.get(bucket, 0),
+        )
+        if score > best_score:
+            best_score = score
+            best_bucket = bucket
+
+    if best_score[0] > 0:
+        return best_bucket
 
     return "other_work"
 
@@ -555,11 +600,8 @@ def _build_normalized_row(
     load_kind: str,
     academic_year: str,
 ) -> Dict[str, Any]:
-    activity_types_cfg = (settings_cfg or {}).get("activity_types") or {}
-    lecture_patterns = activity_types_cfg.get("lecture") or DEFAULT_ACTIVITY_TYPES["lecture"]
-    lab_patterns = activity_types_cfg.get("lab_practice") or DEFAULT_ACTIVITY_TYPES["lab_practice"]
-
     activity_value = _lookup_value(raw_row, resolved_columns, "activity_type_col")
+    activity_group = _detect_activity_group(activity_value, settings_cfg)
     group_value = _lookup_value(raw_row, resolved_columns, "group_col")
     op_value = _lookup_value(raw_row, resolved_columns, "op_col")
 
@@ -569,6 +611,7 @@ def _build_normalized_row(
         "_scope": scope,
         "_scope_key": _scope_key(scope),
         "_load_kind": load_kind,
+        "_activity_group": activity_group,
         "discipline": _coalesce(_lookup_value(raw_row, resolved_columns, "discipline_col")),
         "op": _coalesce(op_value),
         "group": _coalesce(group_value),
@@ -604,7 +647,7 @@ def _build_normalized_row(
     )
 
     if not has_direct_workload:
-        if _matches_patterns(activity_value, lecture_patterns) or _matches_patterns(activity_value, lab_patterns):
+        if activity_group in ("lecture", "lab_practice"):
             pass
         elif total_candidate > 0:
             bucket = _detect_special_bucket(raw_row, resolved_columns, settings_cfg)
@@ -662,7 +705,21 @@ def _merge_workload_rows(rows: List[Dict[str, Any]], settings_cfg: Dict[str, Any
         "academic_period",
         "credits",
     ]
+    sum_cols_by_type = merge_rules.get("sum_cols_by_type") or DEFAULT_SUM_COLS_BY_TYPE
+    group_priority_type = _normalize_text(merge_rules.get("group_priority_type"))
     group_join = merge_rules.get("group_join") or ", "
+    first_non_empty_cols = merge_rules.get("first_non_empty_cols") or []
+
+    field_to_activity_groups: Dict[str, List[str]] = defaultdict(list)
+    for activity_group, fields in (sum_cols_by_type or {}).items():
+        normalized_group = _normalize_text(activity_group)
+        if not normalized_group:
+            continue
+        for field in fields or []:
+            normalized_field = _normalize_text(field)
+            if not normalized_field:
+                continue
+            field_to_activity_groups[normalized_field].append(normalized_group)
 
     grouped: Dict[Tuple[str, ...], List[Dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -677,15 +734,42 @@ def _merge_workload_rows(rows: List[Dict[str, Any]], settings_cfg: Dict[str, Any
             "_scope_key": group_rows[0].get("_scope_key"),
             "discipline": _first_non_empty(group_rows, "discipline"),
             "op": _first_non_empty(group_rows, "op"),
-            "group": _join_unique_texts((_row_merge_value(row, "group") for row in group_rows), separator=group_join),
             "course": _first_non_empty(group_rows, "course"),
             "academic_period": _first_non_empty(group_rows, "academic_period"),
             "credits": _first_non_empty(group_rows, "credits"),
             "student_count": _max_numeric(group_rows, "student_count"),
         }
 
+        preferred_group_rows = [
+            row
+            for row in group_rows
+            if group_priority_type and _normalize_text(row.get("_activity_group")) == group_priority_type
+        ]
+        merged["group"] = _join_unique_texts(
+            (_row_merge_value(row, "group") for row in (preferred_group_rows or group_rows)),
+            separator=group_join,
+        )
+        if not merged["group"] and preferred_group_rows:
+            merged["group"] = _join_unique_texts(
+                (_row_merge_value(row, "group") for row in group_rows),
+                separator=group_join,
+            )
+
+        for field_key in first_non_empty_cols:
+            if field_key in merged:
+                continue
+            merged[field_key] = _first_non_empty(group_rows, field_key)
+
         for field_key in ("l", "spz", "lz", "srsp", "rk_1_2", "ekzameny", "practika", "diploma_supervision", "research_work", "other_work"):
-            merged[field_key] = sum(_to_num(row.get(field_key)) for row in group_rows)
+            activity_groups = field_to_activity_groups.get(field_key) or []
+            if activity_groups:
+                merged[field_key] = sum(
+                    _to_num(row.get(field_key))
+                    for row in group_rows
+                    if _normalize_text(row.get("_activity_group")) in activity_groups
+                )
+            else:
+                merged[field_key] = sum(_to_num(row.get(field_key)) for row in group_rows)
 
         merged["itogo"] = sum(
             _to_num(merged.get(field_key))
