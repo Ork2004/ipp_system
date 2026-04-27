@@ -25,6 +25,108 @@ const topLabelStyle = {
   marginBottom: 8,
 };
 
+function createDefaultConfig() {
+  return {
+    columns: {
+      teacher_col: "",
+      staff_hours_col: "",
+      hourly_hours_col: "",
+      discipline_col: "",
+      activity_type_col: "",
+      group_col: "",
+      op_col: "",
+      course_col: "",
+      academic_period_col: "",
+      credits_col: "",
+      student_count_col: "",
+      payment_form_col: "",
+      normative_col: "",
+      lecture_hours_col: "",
+      practice_hours_col: "",
+      lab_hours_col: "",
+      srsp_hours_col: "",
+      rk_hours_col: "",
+      exam_hours_col: "",
+      practice_load_col: "",
+      diploma_load_col: "",
+      research_load_col: "",
+      other_load_col: "",
+      total_col: "",
+    },
+    activity_types: {
+      lecture: ["Р»РµРє", "Р»Рє", "lecture"],
+      lab_practice: ["Р»Р°Р±", "РїСЂР°", "lab", "pract"],
+    },
+    merge_rules: {
+      key_cols: ["discipline", "op"],
+      group_join: ", ",
+      group_priority_type: "lecture",
+      sum_cols_by_type: {
+        lecture: ["l", "srsp", "ekzameny"],
+        lab_practice: ["spz", "lz", "rk_1_2"],
+      },
+    },
+    special_workload_patterns: {
+      practika: [],
+      diploma_supervision: [],
+      research_work: [],
+      other_work: [],
+    },
+    template_bindings: {
+      teaching_load: {
+        staff: {},
+        hourly: {},
+      },
+    },
+  };
+}
+
+function mergeConfig(baseConfig, loadedConfig = {}) {
+  const base = createDefaultConfig();
+  const loaded = loadedConfig || {};
+
+  return {
+    ...base,
+    ...baseConfig,
+    ...loaded,
+    columns: {
+      ...base.columns,
+      ...(baseConfig?.columns || {}),
+      ...(loaded.columns || {}),
+    },
+    activity_types: {
+      ...base.activity_types,
+      ...(baseConfig?.activity_types || {}),
+      ...(loaded.activity_types || {}),
+    },
+    merge_rules: {
+      ...base.merge_rules,
+      ...(baseConfig?.merge_rules || {}),
+      ...(loaded.merge_rules || {}),
+      sum_cols_by_type: {
+        ...base.merge_rules.sum_cols_by_type,
+        ...(baseConfig?.merge_rules?.sum_cols_by_type || {}),
+        ...(loaded.merge_rules?.sum_cols_by_type || {}),
+      },
+    },
+    special_workload_patterns: {
+      ...base.special_workload_patterns,
+      ...(baseConfig?.special_workload_patterns || {}),
+      ...(loaded.special_workload_patterns || {}),
+    },
+    template_bindings: {
+      ...base.template_bindings,
+      ...(baseConfig?.template_bindings || {}),
+      ...(loaded.template_bindings || {}),
+      teaching_load: {
+        ...base.template_bindings.teaching_load,
+        ...(baseConfig?.template_bindings?.teaching_load || {}),
+        ...(loaded.template_bindings?.teaching_load || {}),
+      },
+    },
+  };
+}
+
 export default function SettingsPage() {
   const [departmentId] = useState(
     Number(localStorage.getItem("department_id") || 0)
@@ -40,42 +142,7 @@ export default function SettingsPage() {
   const [tables, setTables] = useState([]);
   const [status, setStatus] = useState("");
 
-  const [cfg, setCfg] = useState({
-    columns: {
-      teacher_col: "",
-      staff_hours_col: "",
-      hourly_hours_col: "",
-      discipline_col: "",
-      activity_type_col: "",
-      group_col: "",
-      op_col: "",
-      course_col: "",
-      academic_period_col: "",
-      credits_col: "",
-      student_count_col: "",
-      payment_form_col: "",
-      normative_col: "",
-    },
-    activity_types: {
-      lecture: ["лек", "лк", "lecture"],
-      lab_practice: ["лаб", "пра", "lab", "pract"],
-    },
-    merge_rules: {
-      key_cols: ["distsiplina", "op"],
-      group_join: ", ",
-      group_priority_type: "lecture",
-      sum_cols_by_type: {
-        lecture: ["l", "srsp", "ekzameny"],
-        lab_practice: ["spz", "lz", "rk_1_2"],
-      },
-    },
-    template_bindings: {
-      teaching_load: {
-        staff: {},
-        hourly: {},
-      },
-    },
-  });
+  const [cfg, setCfg] = useState(() => createDefaultConfig());
 
   const excelForYear = useMemo(() => {
     return (
@@ -132,13 +199,14 @@ export default function SettingsPage() {
       });
 
       if (res.data?.config) {
-        const loaded = res.data.config;
-        setCfg((prev) => ({
-          ...prev,
-          ...loaded,
-        }));
+        setCfg(mergeConfig(createDefaultConfig(), res.data.config));
+        return;
       }
-    } catch {}
+
+      setCfg(createDefaultConfig());
+    } catch {
+      setCfg(createDefaultConfig());
+    }
   }
 
   async function saveSettings() {
@@ -176,6 +244,21 @@ export default function SettingsPage() {
       activity_types: {
         ...prev.activity_types,
         [typeKey]: arr,
+      },
+    }));
+  }
+
+  function setSpecialPatterns(bucketKey, text) {
+    const arr = text
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    setCfg((prev) => ({
+      ...prev,
+      special_workload_patterns: {
+        ...prev.special_workload_patterns,
+        [bucketKey]: arr,
       },
     }));
   }
@@ -223,6 +306,7 @@ export default function SettingsPage() {
       setCols([]);
       setTables([]);
       setExcelTemplateId("");
+      setCfg(createDefaultConfig());
       return;
     }
 
@@ -466,6 +550,83 @@ export default function SettingsPage() {
                 cols={cols}
                 onChange={(v) => setCol("normative_col", v)}
               />
+
+              <SelectRow
+                label="Лекции (часы)"
+                value={cfg.columns.lecture_hours_col}
+                cols={cols}
+                onChange={(v) => setCol("lecture_hours_col", v)}
+              />
+
+              <SelectRow
+                label="Практ./семин. (часы)"
+                value={cfg.columns.practice_hours_col}
+                cols={cols}
+                onChange={(v) => setCol("practice_hours_col", v)}
+              />
+
+              <SelectRow
+                label="Лабораторные (часы)"
+                value={cfg.columns.lab_hours_col}
+                cols={cols}
+                onChange={(v) => setCol("lab_hours_col", v)}
+              />
+
+              <SelectRow
+                label="СРСП (часы)"
+                value={cfg.columns.srsp_hours_col}
+                cols={cols}
+                onChange={(v) => setCol("srsp_hours_col", v)}
+              />
+
+              <SelectRow
+                label="РК 1,2"
+                value={cfg.columns.rk_hours_col}
+                cols={cols}
+                onChange={(v) => setCol("rk_hours_col", v)}
+              />
+
+              <SelectRow
+                label="Экзамен"
+                value={cfg.columns.exam_hours_col}
+                cols={cols}
+                onChange={(v) => setCol("exam_hours_col", v)}
+              />
+
+              <SelectRow
+                label="Практика"
+                value={cfg.columns.practice_load_col}
+                cols={cols}
+                onChange={(v) => setCol("practice_load_col", v)}
+              />
+
+              <SelectRow
+                label="Рук-во ДП/МД"
+                value={cfg.columns.diploma_load_col}
+                cols={cols}
+                onChange={(v) => setCol("diploma_load_col", v)}
+              />
+
+              <SelectRow
+                label="НИРМ/НИРД"
+                value={cfg.columns.research_load_col}
+                cols={cols}
+                onChange={(v) => setCol("research_load_col", v)}
+              />
+
+              <SelectRow
+                label="ДВР"
+                value={cfg.columns.other_load_col}
+                cols={cols}
+                onChange={(v) => setCol("other_load_col", v)}
+              />
+
+              <SelectRow
+                label="Итого"
+                value={cfg.columns.total_col}
+                cols={cols}
+                onChange={(v) => setCol("total_col", v)}
+              />
             </div>
           </SectionCard>
 
@@ -486,6 +647,43 @@ export default function SettingsPage() {
                 label="Лабораторные / практика"
                 value={cfg.activity_types.lab_practice.join(", ")}
                 onChange={(v) => setActivityPatterns("lab_practice", v)}
+              />
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Спецнагрузка">
+            <div
+              style={{
+                display: "grid",
+                gap: 16,
+              }}
+            >
+              <TextRow
+                label="Практика"
+                value={cfg.special_workload_patterns.practika.join(", ")}
+                onChange={(v) => setSpecialPatterns("practika", v)}
+              />
+
+              <TextRow
+                label="Рук-во ДП/МД"
+                value={cfg.special_workload_patterns.diploma_supervision.join(
+                  ", "
+                )}
+                onChange={(v) =>
+                  setSpecialPatterns("diploma_supervision", v)
+                }
+              />
+
+              <TextRow
+                label="НИРМ/НИРД"
+                value={cfg.special_workload_patterns.research_work.join(", ")}
+                onChange={(v) => setSpecialPatterns("research_work", v)}
+              />
+
+              <TextRow
+                label="ДВР"
+                value={cfg.special_workload_patterns.other_work.join(", ")}
+                onChange={(v) => setSpecialPatterns("other_work", v)}
               />
             </div>
           </SectionCard>
