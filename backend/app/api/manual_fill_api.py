@@ -1,14 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from psycopg2.extras import Json
 
+from backend.app.config import DOCX_DIR
 from backend.app.api.auth_api import get_current_user
 from backend.app.database import get_connection
+from backend.app.utils.manual_docx_importer import import_manual_docx
 from backend.app.utils.manual_prefill import build_prefill_payload
+from backend.app.utils.storage import save_upload_file
 from backend.app.utils.teaching_load import (
-    extract_excel_bound_raw_table_ids,
-    get_teaching_load_summary_binding,
-    is_manual_source_binding,
-    is_teaching_load_summary_raw_table,
+    build_effective_generation_settings,
+    extract_excel_bound_raw_table_ids_with_raw_tables,
 )
 
 router = APIRouter(prefix="/manual-fill", tags=["Manual Fill"])
@@ -420,16 +421,6 @@ def get_manual_fill_form(
     try:
         with conn.cursor() as cur:
             tpl = _get_raw_template(cur, raw_template_id)
-            settings_cfg = _load_generation_settings_config(
-                cur,
-                int(tpl["department_id"]),
-                str(tpl["academic_year"]),
-            )
-            excel_bound_raw_table_ids = extract_excel_bound_raw_table_ids(settings_cfg)
-            summary_binding = get_teaching_load_summary_binding(settings_cfg)
-            summary_binding_raw_table_id = summary_binding.get("raw_table_id")
-            summary_manual = bool(summary_binding) and is_manual_source_binding(summary_binding)
-
             if user.get("role") == "admin":
                 if int(user.get("department_id") or 0) != int(tpl["department_id"]):
                     raise HTTPException(status_code=403, detail="Шаблон другой кафедры")
@@ -454,6 +445,34 @@ def get_manual_fill_form(
                 ORDER BY t.table_index;
             """, (raw_template_id,))
             table_rows = cur.fetchall() or []
+            raw_table_meta_list = [
+                {
+                    "id": row[0],
+                    "table_index": row[1],
+                    "section_title": row[2],
+                    "table_type": row[3],
+                    "row_count": row[4],
+                    "col_count": row[5],
+                    "header_signature": row[6],
+                    "has_total_row": row[7],
+                    "loop_template_row_index": row[8],
+                    "column_hints": row[9] or [],
+                    "table_fingerprint": row[10],
+                    "structure_meta": row[11] or {},
+                    "extra_meta": row[12] or {},
+                }
+                for row in table_rows
+            ]
+            settings_cfg = _load_generation_settings_config(
+                cur,
+                int(tpl["department_id"]),
+                str(tpl["academic_year"]),
+            )
+            effective_settings_cfg = build_effective_generation_settings(settings_cfg, raw_table_meta_list)
+            excel_bound_raw_table_ids = extract_excel_bound_raw_table_ids_with_raw_tables(
+                effective_settings_cfg,
+                raw_table_meta_list,
+            )
 
             tables_out = []
 
@@ -476,19 +495,7 @@ def get_manual_fill_form(
                     "structure_meta": t[11] or {},
                     "extra_meta": t[12] or {},
                 }
-                is_summary_excel_bound = False
-                if summary_binding_raw_table_id:
-                    try:
-                        is_summary_excel_bound = (
-                            int(raw_table_id) == int(summary_binding_raw_table_id)
-                            and not summary_manual
-                        )
-                    except Exception:
-                        is_summary_excel_bound = False
-                elif not summary_manual:
-                    is_summary_excel_bound = is_teaching_load_summary_raw_table(table_meta)
-
-                is_excel_bound = int(raw_table_id) in excel_bound_raw_table_ids or is_summary_excel_bound
+                is_excel_bound = int(raw_table_id) in excel_bound_raw_table_ids
 
                 matrix, editable_values = _load_raw_table_matrix(cur, raw_table_id)
 
@@ -620,6 +627,38 @@ def get_manual_fill_form(
         }
     finally:
         conn.close()
+
+
+@router.post("/import-docx")
+def import_manual_docx_file(
+    raw_template_id: int = Form(...),
+    file: UploadFile = File(...),
+    teacher_id: int | None = Form(None),
+    user=Depends(get_current_user),
+):
+    _role_guard(user)
+
+    teacher_id = _resolve_teacher_id(user, teacher_id)
+    _check_teacher_department_access(user, teacher_id)
+    tpl = _check_template_access(user, int(raw_template_id))
+    saved_path = save_upload_file(file, DOCX_DIR, allowed_exts={".docx"})
+
+    try:
+        result = import_manual_docx(
+            file_path=saved_path,
+            teacher_id=teacher_id,
+            department_id=int(tpl["department_id"]),
+            academic_year=str(tpl["academic_year"]),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        **result,
+        "raw_template_id": int(raw_template_id),
+        "teacher_id": teacher_id,
+        "saved_path": saved_path,
+    }
 
 
 @router.post("/save-static")
