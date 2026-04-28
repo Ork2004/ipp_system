@@ -193,21 +193,59 @@ def detect_semester_columns(columns: List[Tuple[str, str]]) -> Dict[str, str]:
     return out
 
 
-def extract_excel_bound_raw_table_ids(settings_cfg: Dict[str, Any]) -> set[int]:
-    out: set[int] = set()
+def _binding_payload(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _binding_source(binding: Dict[str, Any]) -> str:
+    source = _normalize_text_lower((binding or {}).get("source"))
+    if source in ("manual", "excel"):
+        return source
+    return "excel"
+
+
+def is_manual_source_binding(binding: Dict[str, Any]) -> bool:
+    return _binding_source(binding) == "manual"
+
+
+def is_excel_source_binding(binding: Dict[str, Any]) -> bool:
+    return _binding_source(binding) == "excel"
+
+
+def get_teaching_load_binding(settings_cfg: Dict[str, Any], load_kind: str) -> Dict[str, Any]:
+    template_bindings = (settings_cfg or {}).get("template_bindings") or {}
+    teaching_load_cfg = template_bindings.get("teaching_load") or {}
+    return _binding_payload(teaching_load_cfg.get(load_kind))
+
+
+def get_teaching_load_summary_binding(settings_cfg: Dict[str, Any]) -> Dict[str, Any]:
     template_bindings = (settings_cfg or {}).get("template_bindings") or {}
     teaching_load_cfg = template_bindings.get("teaching_load") or {}
 
-    for binding in teaching_load_cfg.values():
-        raw_table_id = (binding or {}).get("raw_table_id")
+    nested_binding = _binding_payload(teaching_load_cfg.get("summary"))
+    if nested_binding:
+        return nested_binding
+
+    return _binding_payload(template_bindings.get("teaching_load_summary"))
+
+
+def extract_excel_bound_raw_table_ids(settings_cfg: Dict[str, Any]) -> set[int]:
+    out: set[int] = set()
+    for load_kind in ("staff", "hourly"):
+        binding = get_teaching_load_binding(settings_cfg, load_kind)
+        raw_table_id = binding.get("raw_table_id")
+        if not is_excel_source_binding(binding):
+            continue
         if raw_table_id:
             try:
                 out.add(int(raw_table_id))
             except Exception:
                 continue
 
-    teaching_load_summary_cfg = template_bindings.get("teaching_load_summary") or {}
-    raw_table_id = teaching_load_summary_cfg.get("raw_table_id")
+    summary_binding = get_teaching_load_summary_binding(settings_cfg)
+    raw_table_id = summary_binding.get("raw_table_id")
+    if not is_excel_source_binding(summary_binding):
+        raw_table_id = None
     if raw_table_id:
         try:
             out.add(int(raw_table_id))

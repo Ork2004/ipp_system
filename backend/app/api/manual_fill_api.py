@@ -1,9 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException
+from psycopg2.extras import Json
 
 from backend.app.api.auth_api import get_current_user
 from backend.app.database import get_connection
 from backend.app.utils.manual_prefill import build_prefill_payload
-from backend.app.utils.teaching_load import extract_excel_bound_raw_table_ids
+from backend.app.utils.teaching_load import (
+    extract_excel_bound_raw_table_ids,
+    get_teaching_load_summary_binding,
+    is_manual_source_binding,
+    is_teaching_load_summary_raw_table,
+)
 
 router = APIRouter(prefix="/manual-fill", tags=["Manual Fill"])
 
@@ -302,7 +308,7 @@ def _create_snapshot(
         section_title,
         table_type,
         header_signature,
-        column_hints,
+        Json(column_hints or []),
         table_fingerprint,
         source_mode,
         prefilled_from_snapshot_id,
@@ -381,7 +387,7 @@ def _load_current_loop_rows(cur, snapshot_id: int):
     return out
 
 
-def _load_excel_bound_raw_table_ids(cur, department_id: int, academic_year: str) -> set[int]:
+def _load_generation_settings_config(cur, department_id: int, academic_year: str) -> dict:
     cur.execute(
         """
         SELECT gs.config
@@ -395,8 +401,8 @@ def _load_excel_bound_raw_table_ids(cur, department_id: int, academic_year: str)
     )
     row = cur.fetchone()
     if not row:
-        return set()
-    return extract_excel_bound_raw_table_ids(row[0] or {})
+        return {}
+    return row[0] or {}
 
 
 @router.get("/form")
@@ -414,11 +420,15 @@ def get_manual_fill_form(
     try:
         with conn.cursor() as cur:
             tpl = _get_raw_template(cur, raw_template_id)
-            excel_bound_raw_table_ids = _load_excel_bound_raw_table_ids(
+            settings_cfg = _load_generation_settings_config(
                 cur,
                 int(tpl["department_id"]),
                 str(tpl["academic_year"]),
             )
+            excel_bound_raw_table_ids = extract_excel_bound_raw_table_ids(settings_cfg)
+            summary_binding = get_teaching_load_summary_binding(settings_cfg)
+            summary_binding_raw_table_id = summary_binding.get("raw_table_id")
+            summary_manual = bool(summary_binding) and is_manual_source_binding(summary_binding)
 
             if user.get("role") == "admin":
                 if int(user.get("department_id") or 0) != int(tpl["department_id"]):
@@ -449,7 +459,6 @@ def get_manual_fill_form(
 
             for t in table_rows:
                 raw_table_id = t[0]
-                is_excel_bound = int(raw_table_id) in excel_bound_raw_table_ids
 
                 table_meta = {
                     "id": raw_table_id,
@@ -467,6 +476,19 @@ def get_manual_fill_form(
                     "structure_meta": t[11] or {},
                     "extra_meta": t[12] or {},
                 }
+                is_summary_excel_bound = False
+                if summary_binding_raw_table_id:
+                    try:
+                        is_summary_excel_bound = (
+                            int(raw_table_id) == int(summary_binding_raw_table_id)
+                            and not summary_manual
+                        )
+                    except Exception:
+                        is_summary_excel_bound = False
+                elif not summary_manual:
+                    is_summary_excel_bound = is_teaching_load_summary_raw_table(table_meta)
+
+                is_excel_bound = int(raw_table_id) in excel_bound_raw_table_ids or is_summary_excel_bound
 
                 matrix, editable_values = _load_raw_table_matrix(cur, raw_table_id)
 

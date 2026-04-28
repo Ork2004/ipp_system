@@ -11,6 +11,10 @@ from backend.app.utils.manual_docx_filler import apply_manual_fill_to_generated_
 from backend.app.utils.teaching_load import (
     build_teaching_load_context,
     build_teaching_load_summary,
+    get_teaching_load_binding,
+    get_teaching_load_summary_binding,
+    is_excel_source_binding,
+    is_manual_source_binding,
     is_teaching_load_summary_raw_table,
 )
 
@@ -585,14 +589,13 @@ def _resolve_teaching_load_summary_raw_table(
     raw_tables: Dict[int, Dict[str, Any]],
     settings_cfg: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
-    template_bindings = (settings_cfg or {}).get("template_bindings") or {}
-    direct_binding = template_bindings.get("teaching_load_summary") or {}
-    nested_binding = (template_bindings.get("teaching_load") or {}).get("summary") or {}
+    summary_binding = get_teaching_load_summary_binding(settings_cfg)
+    raw_table_id = summary_binding.get("raw_table_id")
 
-    for binding in (nested_binding, direct_binding):
-        raw_table_id = (binding or {}).get("raw_table_id")
-        if not raw_table_id:
-            continue
+    if summary_binding and is_manual_source_binding(summary_binding):
+        return None
+
+    if raw_table_id and is_excel_source_binding(summary_binding):
         raw_table = raw_tables.get(int(raw_table_id))
         if raw_table:
             return raw_table
@@ -744,7 +747,10 @@ def _render_teaching_load_for_kind(
     context: Dict[str, Any],
     load_kind: str,
 ):
-    teaching_binding = (((settings_cfg or {}).get("template_bindings") or {}).get("teaching_load") or {}).get(load_kind) or {}
+    teaching_binding = get_teaching_load_binding(settings_cfg, load_kind)
+    if teaching_binding and is_manual_source_binding(teaching_binding):
+        return
+
     raw_table_id = teaching_binding.get("raw_table_id")
     if not raw_table_id:
         return
