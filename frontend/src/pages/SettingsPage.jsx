@@ -54,8 +54,8 @@ function createDefaultConfig() {
       total_col: "",
     },
     activity_types: {
-      lecture: ["Р»РµРє", "Р»Рє", "lecture"],
-      lab_practice: ["Р»Р°Р±", "РїСЂР°", "lab", "pract"],
+      lecture: ["лек", "лк", "lecture"],
+      lab_practice: ["лаб", "пра", "lab", "pract"],
     },
     merge_rules: {
       key_cols: ["discipline", "op"],
@@ -363,7 +363,7 @@ export default function SettingsPage() {
           color: "#17356f",
         }}
       >
-        Настройка
+        Настройки
       </div>
 
       <div
@@ -721,7 +721,7 @@ export default function SettingsPage() {
               }}
             >
               <TextRow
-                label="Key cols"
+                label="Ключевые колонки"
                 value={cfg.merge_rules.key_cols.join(", ")}
                 onChange={(v) => setMergeRuleArray("key_cols", v)}
               />
@@ -751,7 +751,7 @@ export default function SettingsPage() {
                 onSourceChange={(v) => setTeachingLoadSource("hourly", v)}
               />
               <TeachingLoadBinding
-                label="Summary"
+                label="Сводная"
                 tables={tables}
                 binding={cfg.template_bindings.teaching_load.summary}
                 onTableChange={(v) => setTeachingLoadTable("summary", v)}
@@ -833,6 +833,8 @@ function SelectRow({ label, value, cols, onChange }) {
           padding: "0 14px",
           fontSize: 15,
           color: "#1f2f4d",
+          WebkitTextFillColor: "#1f2f4d",
+          caretColor: "#1f2f4d",
           outline: "none",
           boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
         }}
@@ -873,50 +875,12 @@ function TextRow({ label, value, onChange }) {
           padding: "0 14px",
           fontSize: 15,
           color: "#1f2f4d",
+          WebkitTextFillColor: "#1f2f4d",
+          caretColor: "#1f2f4d",
           outline: "none",
           boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
         }}
       />
-    </div>
-  );
-}
-
-function LegacyTeachingLoadBinding({ label, tables, value, onChange }) {
-  return (
-    <div style={{ display: "grid", gap: 8 }}>
-      <label
-        style={{
-          fontSize: 15,
-          fontWeight: 700,
-          color: "#334155",
-        }}
-      >
-        {label}
-      </label>
-
-      <select
-        value={value || ""}
-        onChange={(e) => onChange(e.target.value)}
-        style={{
-          width: "100%",
-          height: 52,
-          borderRadius: 14,
-          border: "1px solid #d9e3f5",
-          background: "#f8fbff",
-          padding: "0 14px",
-          fontSize: 15,
-          color: "#1f2f4d",
-          outline: "none",
-          boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
-        }}
-      >
-        <option value="">Выбери таблицу</option>
-        {(tables || []).map((t) => (
-          <option key={t.id} value={t.id}>
-            Таблица {t.table_index + 1}
-          </option>
-        ))}
-      </select>
     </div>
   );
 }
@@ -962,12 +926,14 @@ function TeachingLoadBinding({
             padding: "0 14px",
             fontSize: 15,
             color: "#1f2f4d",
+            WebkitTextFillColor: "#1f2f4d",
+            caretColor: "#1f2f4d",
             outline: "none",
             boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
           }}
         >
           <option value="excel">Excel</option>
-          <option value="manual">Manual</option>
+          <option value="manual">Вручную</option>
         </select>
 
         <select
@@ -982,14 +948,16 @@ function TeachingLoadBinding({
             padding: "0 14px",
             fontSize: 15,
             color: "#1f2f4d",
+            WebkitTextFillColor: "#1f2f4d",
+            caretColor: "#1f2f4d",
             outline: "none",
             boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
           }}
         >
-          <option value="">Р’С‹Р±РµСЂРё С‚Р°Р±Р»РёС†Сѓ</option>
+          <option value="">Выберите таблицу</option>
           {(tables || []).map((t) => (
             <option key={t.id} value={t.id}>
-              РўР°Р±Р»РёС†Р° {t.table_index + 1}
+              Таблица {t.table_index + 1}
             </option>
           ))}
         </select>
