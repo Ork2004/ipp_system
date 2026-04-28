@@ -74,8 +74,9 @@ function createDefaultConfig() {
     },
     template_bindings: {
       teaching_load: {
-        staff: {},
-        hourly: {},
+        staff: { source: "excel" },
+        hourly: { source: "excel" },
+        summary: { source: "excel" },
       },
     },
   };
@@ -84,6 +85,13 @@ function createDefaultConfig() {
 function mergeConfig(baseConfig, loadedConfig = {}) {
   const base = createDefaultConfig();
   const loaded = loadedConfig || {};
+  const mergedSummaryBinding = {
+    ...base.template_bindings.teaching_load.summary,
+    ...(baseConfig?.template_bindings?.teaching_load_summary || {}),
+    ...(loaded.template_bindings?.teaching_load_summary || {}),
+    ...(baseConfig?.template_bindings?.teaching_load?.summary || {}),
+    ...(loaded.template_bindings?.teaching_load?.summary || {}),
+  };
 
   return {
     ...base,
@@ -122,6 +130,7 @@ function mergeConfig(baseConfig, loadedConfig = {}) {
         ...base.template_bindings.teaching_load,
         ...(baseConfig?.template_bindings?.teaching_load || {}),
         ...(loaded.template_bindings?.teaching_load || {}),
+        summary: mergedSummaryBinding,
       },
     },
   };
@@ -278,16 +287,32 @@ export default function SettingsPage() {
     }));
   }
 
-  function setTeachingLoadTable(loadKind, tableId) {
+  function setTeachingLoadBinding(loadKind, patch) {
     setCfg((prev) => ({
       ...prev,
       template_bindings: {
+        ...prev.template_bindings,
         teaching_load: {
           ...prev.template_bindings.teaching_load,
-          [loadKind]: tableId ? { raw_table_id: Number(tableId) } : {},
+          [loadKind]: {
+            ...(prev.template_bindings.teaching_load?.[loadKind] || {}),
+            ...patch,
+          },
         },
       },
     }));
+  }
+
+  function setTeachingLoadTable(loadKind, tableId) {
+    setTeachingLoadBinding(loadKind, {
+      raw_table_id: tableId ? Number(tableId) : undefined,
+    });
+  }
+
+  function setTeachingLoadSource(loadKind, source) {
+    setTeachingLoadBinding(loadKind, {
+      source: source === "manual" ? "manual" : "excel",
+    });
   }
 
   function handleYearChange(value) {
@@ -713,15 +738,24 @@ export default function SettingsPage() {
               <TeachingLoadBinding
                 label="Штатка"
                 tables={tables}
-                value={cfg.template_bindings.teaching_load.staff.raw_table_id}
-                onChange={(v) => setTeachingLoadTable("staff", v)}
+                binding={cfg.template_bindings.teaching_load.staff}
+                onTableChange={(v) => setTeachingLoadTable("staff", v)}
+                onSourceChange={(v) => setTeachingLoadSource("staff", v)}
               />
 
               <TeachingLoadBinding
                 label="Почасовая"
                 tables={tables}
-                value={cfg.template_bindings.teaching_load.hourly.raw_table_id}
-                onChange={(v) => setTeachingLoadTable("hourly", v)}
+                binding={cfg.template_bindings.teaching_load.hourly}
+                onTableChange={(v) => setTeachingLoadTable("hourly", v)}
+                onSourceChange={(v) => setTeachingLoadSource("hourly", v)}
+              />
+              <TeachingLoadBinding
+                label="Summary"
+                tables={tables}
+                binding={cfg.template_bindings.teaching_load.summary}
+                onTableChange={(v) => setTeachingLoadTable("summary", v)}
+                onSourceChange={(v) => setTeachingLoadSource("summary", v)}
               />
             </div>
           </SectionCard>
@@ -847,7 +881,7 @@ function TextRow({ label, value, onChange }) {
   );
 }
 
-function TeachingLoadBinding({ label, tables, value, onChange }) {
+function LegacyTeachingLoadBinding({ label, tables, value, onChange }) {
   return (
     <div style={{ display: "grid", gap: 8 }}>
       <label
@@ -883,6 +917,83 @@ function TeachingLoadBinding({ label, tables, value, onChange }) {
           </option>
         ))}
       </select>
+    </div>
+  );
+}
+
+function TeachingLoadBinding({
+  label,
+  tables,
+  binding,
+  onTableChange,
+  onSourceChange,
+}) {
+  const source = binding?.source === "manual" ? "manual" : "excel";
+  const value = binding?.raw_table_id || "";
+
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <label
+        style={{
+          fontSize: 15,
+          fontWeight: 700,
+          color: "#334155",
+        }}
+      >
+        {label}
+      </label>
+
+      <div
+        style={{
+          display: "grid",
+          gap: 12,
+          gridTemplateColumns: "180px minmax(0, 1fr)",
+        }}
+      >
+        <select
+          value={source}
+          onChange={(e) => onSourceChange(e.target.value)}
+          style={{
+            width: "100%",
+            height: 52,
+            borderRadius: 14,
+            border: "1px solid #d9e3f5",
+            background: "#f8fbff",
+            padding: "0 14px",
+            fontSize: 15,
+            color: "#1f2f4d",
+            outline: "none",
+            boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
+          }}
+        >
+          <option value="excel">Excel</option>
+          <option value="manual">Manual</option>
+        </select>
+
+        <select
+          value={value}
+          onChange={(e) => onTableChange(e.target.value)}
+          style={{
+            width: "100%",
+            height: 52,
+            borderRadius: 14,
+            border: "1px solid #d9e3f5",
+            background: "#f8fbff",
+            padding: "0 14px",
+            fontSize: 15,
+            color: "#1f2f4d",
+            outline: "none",
+            boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
+          }}
+        >
+          <option value="">Р’С‹Р±РµСЂРё С‚Р°Р±Р»РёС†Сѓ</option>
+          {(tables || []).map((t) => (
+            <option key={t.id} value={t.id}>
+              РўР°Р±Р»РёС†Р° {t.table_index + 1}
+            </option>
+          ))}
+        </select>
+      </div>
     </div>
   );
 }

@@ -705,6 +705,36 @@ export default function ManualTablesPage() {
                     >
                       <span>Таблица {Number(table.table_index) + 1}</span>
 
+                      {table.excel_bound ? (
+                        <span
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 800,
+                            color: "#315fcb",
+                            background: "rgba(49,95,203,0.10)",
+                            border: "1px solid rgba(49,95,203,0.20)",
+                            borderRadius: 999,
+                            padding: "6px 10px",
+                          }}
+                        >
+                          Excel
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 800,
+                            color: "#1f8f57",
+                            background: "rgba(31,143,87,0.10)",
+                            border: "1px solid rgba(31,143,87,0.20)",
+                            borderRadius: 999,
+                            padding: "6px 10px",
+                          }}
+                        >
+                          Manual
+                        </span>
+                      )}
+
                       {table.prefill?.found ? (
                         <span
                           style={{
@@ -759,13 +789,27 @@ export default function ManualTablesPage() {
                           table={table}
                           formValues={formValues}
                           onChange={setStaticValue}
+                          readOnly={!!table.excel_bound}
                         />
+
+                        {table.excel_bound ? (
+                          <div
+                            className="small"
+                            style={{
+                              marginTop: 14,
+                              color: "#5f7195",
+                              fontWeight: 500,
+                            }}
+                          >
+                            Эта таблица заполняется из Excel нагрузки. Ручное сохранение отключено.
+                          </div>
+                        ) : null}
 
                         <div className="actions-row" style={{ marginTop: 14 }}>
                           <button
                             className="btn btn-primary"
                             onClick={() => saveStaticTable(table)}
-                            disabled={savingStaticTableId === table.id}
+                            disabled={table.excel_bound || savingStaticTableId === table.id}
                             style={{
                               minWidth: 150,
                               height: 46,
@@ -792,6 +836,7 @@ export default function ManualTablesPage() {
                         addingLoopTableId={addingLoopTableId}
                         savingLoopRowId={savingLoopRowId}
                         deletingLoopRowId={deletingLoopRowId}
+                        readOnly={!!table.excel_bound}
                       />
                     )}
                   </div>
@@ -861,7 +906,7 @@ function compressRow(row) {
   return out;
 }
 
-function StaticTableGrid({ table, formValues, onChange }) {
+function StaticTableGrid({ table, formValues, onChange, readOnly = false }) {
   const matrix = Array.isArray(table.matrix) ? table.matrix : [];
   const prefillMap = new Map(
     (table.editable_values || [])
@@ -944,9 +989,10 @@ function StaticTableGrid({ table, formValues, onChange }) {
                               onChange={(e) =>
                                 onChange(cell.raw_cell_id, e.target.value)
                               }
+                              disabled={readOnly}
                               placeholder="Введите значение"
                               style={{
-                                background: "#fff",
+                                background: readOnly ? "#eef4ff" : "#fff",
                                 border: "1px solid #d9e3f5",
                                 borderRadius: 12,
                                 minHeight: 42,
@@ -990,6 +1036,7 @@ function LoopTableEditor({
   addingLoopTableId,
   savingLoopRowId,
   deletingLoopRowId,
+  readOnly = false,
 }) {
   return (
     <div>
@@ -1028,7 +1075,7 @@ function LoopTableEditor({
         <button
           className="btn btn-primary"
           onClick={onAddRow}
-          disabled={addingLoopTableId === table.id}
+          disabled={readOnly || addingLoopTableId === table.id}
           style={{
             minWidth: 170,
             height: 46,
@@ -1040,6 +1087,19 @@ function LoopTableEditor({
           {addingLoopTableId === table.id ? "Добавление..." : "Добавить строку"}
         </button>
       </div>
+
+      {readOnly ? (
+        <div
+          className="small"
+          style={{
+            marginTop: 14,
+            color: "#5f7195",
+            fontWeight: 500,
+          }}
+        >
+          Эта таблица заполняется из Excel нагрузки. Ручное редактирование отключено.
+        </div>
+      ) : null}
 
       {!rows?.length ? (
         <div
@@ -1110,7 +1170,7 @@ function LoopTableEditor({
                   <button
                     className="btn btn-primary"
                     onClick={() => onSaveRow(row)}
-                    disabled={savingLoopRowId === String(row.loop_row_id)}
+                    disabled={readOnly || savingLoopRowId === String(row.loop_row_id)}
                     style={{
                       minWidth: 130,
                       height: 42,
@@ -1127,7 +1187,7 @@ function LoopTableEditor({
                   <button
                     className="btn btn-danger"
                     onClick={() => onDeleteRow(row)}
-                    disabled={deletingLoopRowId === String(row.loop_row_id)}
+                    disabled={readOnly || deletingLoopRowId === String(row.loop_row_id)}
                     style={{
                       minWidth: 120,
                       height: 42,
@@ -1185,9 +1245,10 @@ function LoopTableEditor({
                               e.target.value
                             )
                           }
+                          disabled={readOnly}
                           placeholder="Введите значение"
                           style={{
-                            background: "#f8fbff",
+                            background: readOnly ? "#eef4ff" : "#f8fbff",
                             border: "1px solid #d9e3f5",
                             borderRadius: 12,
                             minHeight: 42,

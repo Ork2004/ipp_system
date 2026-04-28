@@ -6,6 +6,8 @@ from docx import Document
 from backend.app.database import get_connection
 from backend.app.utils.teaching_load import (
     extract_excel_bound_raw_table_ids,
+    get_teaching_load_summary_binding,
+    is_manual_source_binding,
     is_teaching_load_summary_raw_table,
 )
 
@@ -111,7 +113,7 @@ def _load_snapshot_map(cur, teacher_id: int, academic_year: str) -> Dict[int, Di
     return out
 
 
-def _load_excel_bound_raw_table_ids(cur, department_id: int, academic_year: str) -> set[int]:
+def _load_generation_settings_config(cur, department_id: int, academic_year: str) -> Dict[str, Any]:
     cur.execute(
         """
         SELECT gs.config
@@ -125,11 +127,19 @@ def _load_excel_bound_raw_table_ids(cur, department_id: int, academic_year: str)
     )
     row = cur.fetchone()
     if not row:
+        return {}
+    return row[0] or {}
+
+
+def _load_auto_excel_bound_raw_table_ids(
+    cur,
+    raw_template_id: int,
+    *,
+    include_summary_tables: bool,
+) -> set[int]:
+    if not include_summary_tables:
         return set()
-    return extract_excel_bound_raw_table_ids(row[0] or {})
 
-
-def _load_auto_excel_bound_raw_table_ids(cur, raw_template_id: int) -> set[int]:
     cur.execute(
         """
         SELECT
@@ -405,9 +415,19 @@ def apply_manual_fill_to_generated_docx(
             if not raw_template_id:
                 return
 
-            excel_bound_raw_table_ids = _load_excel_bound_raw_table_ids(cur, department_id, academic_year)
+            settings_cfg = _load_generation_settings_config(cur, department_id, academic_year)
+            excel_bound_raw_table_ids = extract_excel_bound_raw_table_ids(settings_cfg)
+            summary_binding = get_teaching_load_summary_binding(settings_cfg)
+            include_auto_summary_tables = not (
+                summary_binding and is_manual_source_binding(summary_binding)
+            ) and not summary_binding.get("raw_table_id")
+
             excel_bound_raw_table_ids.update(
-                _load_auto_excel_bound_raw_table_ids(cur, raw_template_id)
+                _load_auto_excel_bound_raw_table_ids(
+                    cur,
+                    raw_template_id,
+                    include_summary_tables=include_auto_summary_tables,
+                )
             )
 
             static_tables = _load_manual_static_tables(
