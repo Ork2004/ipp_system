@@ -1,6 +1,22 @@
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.utils import column_index_from_string, get_column_letter
+
+
+# Order matters here only for the simple xlsx export.
+DATA_CATEGORY_TO_FIELD = {
+    "teaching_auditory": "teaching_auditory_hours",
+    "teaching_extraauditory": "teaching_extraauditory_hours",
+    "methodical": "methodical_hours",
+    "research": "research_hours",
+    "organizational_methodical": "organizational_methodical_hours",
+    "educational": "educational_hours",
+    "qualification": "qualification_hours",
+    "social": "social_hours",
+    "hourly_auditory": "hourly_auditory_hours",
+    "hourly_extraauditory": "hourly_extraauditory_hours",
+}
 
 
 def build_form63_rows_from_preview(items: list[dict]) -> list[dict]:
@@ -11,16 +27,17 @@ def build_form63_rows_from_preview(items: list[dict]) -> list[dict]:
             "teacher_name": item["teacher_name"],
             "position": item["position"],
             "semester": item["semester"],
-            "teaching_auditory_hours": item["teaching_auditory_hours"],
-            "teaching_extraauditory_hours": item["teaching_extraauditory_hours"],
-            "methodical_hours": item["methodical_hours"],
-            "research_hours": item["research_hours"],
-            "organizational_methodical_hours": item["organizational_methodical_hours"],
-            "educational_hours": item["educational_hours"],
-            "qualification_hours": item["qualification_hours"],
-            "social_hours": item["social_hours"],
-            "planned_total_hours": item["planned_total_hours"],
-            "hourly_auditory_hours": item["hourly_auditory_hours"],
+            "teaching_auditory_hours": item.get("teaching_auditory_hours", 0),
+            "teaching_extraauditory_hours": item.get("teaching_extraauditory_hours", 0),
+            "methodical_hours": item.get("methodical_hours", 0),
+            "research_hours": item.get("research_hours", 0),
+            "organizational_methodical_hours": item.get("organizational_methodical_hours", 0),
+            "educational_hours": item.get("educational_hours", 0),
+            "qualification_hours": item.get("qualification_hours", 0),
+            "social_hours": item.get("social_hours", 0),
+            "planned_total_hours": item.get("planned_total_hours", 0),
+            "hourly_auditory_hours": item.get("hourly_auditory_hours", 0),
+            "hourly_extraauditory_hours": item.get("hourly_extraauditory_hours", 0),
         })
 
     return rows
@@ -67,19 +84,8 @@ def export_form63_simple_xlsx(rows: list[dict], output_path: str):
         ])
 
     widths = {
-        "A": 35,
-        "B": 25,
-        "C": 10,
-        "D": 22,
-        "E": 24,
-        "F": 24,
-        "G": 18,
-        "H": 28,
-        "I": 20,
-        "J": 22,
-        "K": 18,
-        "L": 18,
-        "M": 22,
+        "A": 35, "B": 25, "C": 10, "D": 22, "E": 24, "F": 24,
+        "G": 18, "H": 28, "I": 20, "J": 22, "K": 18, "L": 18, "M": 22,
     }
     for col, width in widths.items():
         ws.column_dimensions[col].width = width
@@ -88,20 +94,76 @@ def export_form63_simple_xlsx(rows: list[dict], output_path: str):
     wb.save(output_path)
 
 
-def export_form63_from_template(rows: list[dict], template_path: str, output_path: str):
+# ---------- template-driven export ----------
+
+def _is_merged_range(ws, range_str: str) -> bool:
+    return range_str in {str(r) for r in ws.merged_cells.ranges}
+
+
+def _safe_merge(ws, range_str: str):
+    if _is_merged_range(ws, range_str):
+        return
+    # Some templates may already merge a wider range that contains this one.
+    # In that case openpyxl raises on overlap; we just skip silently.
+    try:
+        ws.merge_cells(range_str)
+    except Exception:
+        pass
+
+
+def _write_value(ws, letter: str, row: int, value):
+    ws[f"{letter}{row}"] = value
+
+
+def _put(ws, mapping: dict[str, str], category: str, row: int, value):
+    """Write `value` into the column mapped to `category`, if mapping has it."""
+    letter = mapping.get(category)
+    if not letter:
+        return
+    _write_value(ws, letter, row, value)
+
+
+def _category_span_in_header(ws, mapping: dict[str, str], category: str, header_row: int):
+    """
+    If a category column belongs to a horizontally-merged header range
+    (e.g. ФИО merged across D:F), return the (min_letter, max_letter) of that
+    merged span. Used to also merge data cells across the same horizontal span.
+    """
+    letter = mapping.get(category)
+    if not letter:
+        return None
+    col = column_index_from_string(letter)
+    for mr in ws.merged_cells.ranges:
+        if mr.min_row <= header_row <= mr.max_row and mr.min_col <= col <= mr.max_col:
+            if mr.max_col > mr.min_col:
+                return (get_column_letter(mr.min_col), get_column_letter(mr.max_col))
+    return None
+
+
+def export_form63_from_template(
+    rows: list[dict],
+    template_path: str,
+    output_path: str,
+    column_mapping: dict[str, str],
+    data_start_row: int,
+):
+    """
+    Fill a Form 63 XLSX template using a per-template column mapping.
+
+    Each teacher occupies two consecutive rows (semester 1, semester 2).
+    Cells are merged where appropriate so the visual layout matches the
+    target form: row number / ФИО / Должность span both rows, and the
+    horizontally-merged header spans (e.g. D:F for ФИО, G:I for Должность)
+    are reused for the data rows.
+    """
+    if not column_mapping:
+        raise ValueError("column_mapping пустой — невозможно сгенерировать Форму 63")
+
     wb = load_workbook(template_path)
     ws = wb.active
 
-    # Разъединяем merged cells только в области данных, шапку не трогаем
-    ranges_to_unmerge = []
-    for merged_range in ws.merged_cells.ranges:
-        if merged_range.min_row >= 16:
-            ranges_to_unmerge.append(str(merged_range))
-
-    for rng in ranges_to_unmerge:
-        ws.unmerge_cells(rng)
-
-    grouped = {}
+    # group input rows by teacher
+    grouped: dict[tuple, dict] = {}
     for row in rows:
         key = (row["teacher_name"], row["position"])
         if key not in grouped:
@@ -111,78 +173,84 @@ def export_form63_from_template(rows: list[dict], template_path: str, output_pat
                 "sem1": None,
                 "sem2": None,
             }
-
         if row["semester"] == 1:
             grouped[key]["sem1"] = row
         elif row["semester"] == 2:
             grouped[key]["sem2"] = row
 
-    start_row = 16
-    current_row = start_row
+    teacher_name_span = _category_span_in_header(
+        ws, column_mapping, "teacher_name", data_start_row - 4,
+    ) or _category_span_in_header(
+        ws, column_mapping, "teacher_name", data_start_row - 1,
+    )
+    position_span = _category_span_in_header(
+        ws, column_mapping, "position", data_start_row - 4,
+    ) or _category_span_in_header(
+        ws, column_mapping, "position", data_start_row - 1,
+    )
+
+    teaching_auditory_letter = column_mapping.get("teaching_auditory")
+    social_letter = column_mapping.get("social")
+    total_letter = column_mapping.get("total")
+
+    def empty_sem(sem_no: int) -> dict:
+        return {
+            "semester": sem_no,
+            "teaching_auditory_hours": 0,
+            "teaching_extraauditory_hours": 0,
+            "methodical_hours": 0,
+            "research_hours": 0,
+            "organizational_methodical_hours": 0,
+            "educational_hours": 0,
+            "qualification_hours": 0,
+            "social_hours": 0,
+            "planned_total_hours": 0,
+            "hourly_auditory_hours": 0,
+            "hourly_extraauditory_hours": 0,
+        }
+
+    current_row = data_start_row
     no = 1
 
     for _, teacher in grouped.items():
-        sem1 = teacher["sem1"] or {
-            "semester": 1,
-            "teaching_auditory_hours": 0,
-            "teaching_extraauditory_hours": 0,
-            "methodical_hours": 0,
-            "research_hours": 0,
-            "organizational_methodical_hours": 0,
-            "educational_hours": 0,
-            "qualification_hours": 0,
-            "social_hours": 0,
-            "planned_total_hours": 0,
-            "hourly_auditory_hours": 0,
-        }
+        sem1 = teacher["sem1"] or empty_sem(1)
+        sem2 = teacher["sem2"] or empty_sem(2)
 
-        sem2 = teacher["sem2"] or {
-            "semester": 2,
-            "teaching_auditory_hours": 0,
-            "teaching_extraauditory_hours": 0,
-            "methodical_hours": 0,
-            "research_hours": 0,
-            "organizational_methodical_hours": 0,
-            "educational_hours": 0,
-            "qualification_hours": 0,
-            "social_hours": 0,
-            "planned_total_hours": 0,
-            "hourly_auditory_hours": 0,
-        }
+        for offset, sem_data, sem_no in (
+            (0, sem1, 1),
+            (1, sem2, 2),
+        ):
+            r = current_row + offset
+            _put(ws, column_mapping, "semester", r, sem_no)
 
-        # 1 семестр
-        ws[f"C{current_row}"] = no
-        ws[f"D{current_row}"] = teacher["teacher_name"]
-        ws[f"G{current_row}"] = teacher["position"]
-        ws[f"J{current_row}"] = 1
-        ws[f"K{current_row}"] = sem1["teaching_auditory_hours"]
-        ws[f"L{current_row}"] = sem1["teaching_extraauditory_hours"]
-        ws[f"M{current_row}"] = sem1["methodical_hours"]
-        ws[f"N{current_row}"] = sem1["research_hours"]
-        ws[f"O{current_row}"] = sem1["organizational_methodical_hours"]
-        ws[f"P{current_row}"] = sem1["educational_hours"]
-        ws[f"Q{current_row}"] = sem1["qualification_hours"]
-        ws[f"R{current_row}"] = sem1["social_hours"]
-        ws[f"S{current_row}"] = sem1["planned_total_hours"]
-        ws[f"T{current_row}"] = sem1["hourly_auditory_hours"]
-        ws[f"U{current_row}"] = 0
+            for category, field in DATA_CATEGORY_TO_FIELD.items():
+                _put(ws, column_mapping, category, r, sem_data.get(field, 0))
 
-        # 2 семестр
-        ws[f"C{current_row + 1}"] = no
-        ws[f"D{current_row + 1}"] = teacher["teacher_name"]
-        ws[f"G{current_row + 1}"] = teacher["position"]
-        ws[f"J{current_row + 1}"] = 2
-        ws[f"K{current_row + 1}"] = sem2["teaching_auditory_hours"]
-        ws[f"L{current_row + 1}"] = sem2["teaching_extraauditory_hours"]
-        ws[f"M{current_row + 1}"] = sem2["methodical_hours"]
-        ws[f"N{current_row + 1}"] = sem2["research_hours"]
-        ws[f"O{current_row + 1}"] = sem2["organizational_methodical_hours"]
-        ws[f"P{current_row + 1}"] = sem2["educational_hours"]
-        ws[f"Q{current_row + 1}"] = sem2["qualification_hours"]
-        ws[f"R{current_row + 1}"] = sem2["social_hours"]
-        ws[f"S{current_row + 1}"] = sem2["planned_total_hours"]
-        ws[f"T{current_row + 1}"] = sem2["hourly_auditory_hours"]
-        ws[f"U{current_row + 1}"] = 0
+            # Total as a SUM formula across the data columns from
+            # teaching_auditory to social (the K..R range in the canonical layout).
+            if total_letter and teaching_auditory_letter and social_letter:
+                ws[f"{total_letter}{r}"] = (
+                    f"=SUM({teaching_auditory_letter}{r}:{social_letter}{r})"
+                )
+
+        _put(ws, column_mapping, "row_number", current_row, no)
+        _put(ws, column_mapping, "teacher_name", current_row, teacher["teacher_name"])
+        _put(ws, column_mapping, "position", current_row, teacher["position"])
+
+        # --- merges for the teacher block (idempotent) ---
+        rn_letter = column_mapping.get("row_number")
+        if rn_letter:
+            _safe_merge(ws, f"{rn_letter}{current_row}:{rn_letter}{current_row + 1}")
+
+        tn_letter = column_mapping.get("teacher_name")
+        if tn_letter:
+            tn_min, tn_max = (teacher_name_span or (tn_letter, tn_letter))
+            _safe_merge(ws, f"{tn_min}{current_row}:{tn_max}{current_row + 1}")
+
+        pos_letter = column_mapping.get("position")
+        if pos_letter:
+            p_min, p_max = (position_span or (pos_letter, pos_letter))
+            _safe_merge(ws, f"{p_min}{current_row}:{p_max}{current_row + 1}")
 
         current_row += 2
         no += 1

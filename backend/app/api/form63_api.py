@@ -1,17 +1,28 @@
+import json
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
+from backend.app.api.auth_api import require_roles
+from backend.app.config import FORM63_DIR
 from backend.app.database import get_connection
 from backend.app.utils.form63_generator import (
     build_form63_rows_from_preview,
     export_form63_from_template,
     export_form63_simple_xlsx,
 )
+from backend.app.utils.form63_template_parser import (
+    REQUIRED_CATEGORIES,
+    missing_required,
+    parse_form63_template,
+)
+from backend.app.utils.storage import safe_resolve_in_dir, save_upload_file
 
 router = APIRouter(prefix="/form63", tags=["Form63"])
 
+
+# ---------- helpers ----------
 
 def _to_num(value):
     if value is None:
@@ -68,7 +79,6 @@ def _classify_form63_row(row_data: dict) -> str:
     if activity in {"лек", "лаб/пра", "моок-0"} and payment == "штат":
         return "staff_auditory"
 
-    # МООК-0 с пустой оплатой и одинаковыми staff/hourly считаем как штатную аудиторную
     if (
         not payment
         and activity in {"лек", "лаб/пра", "моок-0"}
@@ -162,6 +172,34 @@ def _build_form63_preview_rows(excel_template_id: int) -> list[dict]:
             conn.close()
 
 
+def _load_form63_template(form63_template_id: int) -> dict:
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, department_id, academic_year, file_path,
+                       source_filename, column_mapping, data_start_row
+                FROM form63_templates
+                WHERE id = %s
+            """, (form63_template_id,))
+            row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Form 63 шаблон не найден")
+        return {
+            "id": row[0],
+            "department_id": row[1],
+            "academic_year": row[2],
+            "file_path": row[3],
+            "source_filename": row[4],
+            "column_mapping": row[5],
+            "data_start_row": row[6],
+        }
+    finally:
+        conn.close()
+
+
+# ---------- preview ----------
+
 @router.get("/preview")
 def form63_preview(excel_template_id: int):
     try:
@@ -178,6 +216,239 @@ def form63_preview(excel_template_id: int):
             "detail": str(e),
         }
 
+
+# ---------- form63 templates: upload / list / delete / mapping ----------
+
+@router.post("/templates")
+def upload_form63_template(
+    department_id: int = Form(...),
+    academic_year: str = Form(...),
+    file: UploadFile = File(...),
+    user=Depends(require_roles("admin")),
+):
+    admin_dep = user.get("department_id")
+    if not admin_dep or int(department_id) != int(admin_dep):
+        raise HTTPException(
+            status_code=403,
+            detail="department_id должен совпадать с кафедрой админа",
+        )
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id FROM form63_templates
+                WHERE department_id = %s AND academic_year = %s
+            """, (department_id, academic_year))
+            if cur.fetchone():
+                raise HTTPException(
+                    status_code=409,
+                    detail="На этот учебный год уже загружен шаблон Формы 63. "
+                           "Удалите его в списке и загрузите новый.",
+                )
+    finally:
+        conn.close()
+
+    saved_path = save_upload_file(file, FORM63_DIR, allowed_exts={".xlsx"})
+
+    try:
+        parsed = parse_form63_template(saved_path)
+    except Exception as e:
+        Path(saved_path).unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Не удалось распарсить шаблон: {e}",
+        )
+
+    column_mapping = parsed["column_mapping"]
+    data_start_row = parsed["data_start_row"]
+    detection_meta = parsed["detection_meta"]
+
+    missing = missing_required(column_mapping)
+    if missing:
+        Path(saved_path).unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Шаблон не похож на Форму 63: отсутствуют обязательные колонки "
+                f"{missing}. Проверьте загруженный файл."
+            ),
+        )
+
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO form63_templates (
+                        department_id, academic_year,
+                        file_path, source_filename,
+                        column_mapping, data_start_row,
+                        detection_meta, status
+                    )
+                    VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s::jsonb, 'parsed')
+                    RETURNING id
+                    """,
+                    (
+                        department_id,
+                        academic_year,
+                        saved_path,
+                        file.filename,
+                        json.dumps(column_mapping),
+                        data_start_row,
+                        json.dumps(detection_meta, ensure_ascii=False),
+                    ),
+                )
+                form63_template_id = cur.fetchone()[0]
+    finally:
+        conn.close()
+
+    return {
+        "status": "ok",
+        "id": form63_template_id,
+        "department_id": department_id,
+        "academic_year": academic_year,
+        "source_filename": file.filename,
+        "saved_path": saved_path,
+        "column_mapping": column_mapping,
+        "data_start_row": data_start_row,
+        "detection_meta": detection_meta,
+        "required_categories": list(REQUIRED_CATEGORIES),
+    }
+
+
+@router.get("/templates")
+def list_form63_templates(department_id: int, user=Depends(require_roles("admin"))):
+    admin_dep = user.get("department_id")
+    if not admin_dep or int(department_id) != int(admin_dep):
+        raise HTTPException(status_code=403, detail="Нельзя смотреть другую кафедру")
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, academic_year, source_filename, file_path,
+                       column_mapping, data_start_row, status, created_at
+                FROM form63_templates
+                WHERE department_id = %s
+                ORDER BY academic_year DESC, created_at DESC
+            """, (department_id,))
+            rows = cur.fetchall()
+        return [
+            {
+                "id": r[0],
+                "academic_year": r[1],
+                "source_filename": r[2],
+                "file_path": r[3],
+                "column_mapping": r[4],
+                "data_start_row": r[5],
+                "status": r[6],
+                "created_at": r[7],
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+@router.get("/templates/{form63_template_id}")
+def get_form63_template(
+    form63_template_id: int,
+    user=Depends(require_roles("admin")),
+):
+    admin_dep = user.get("department_id")
+    tpl = _load_form63_template(form63_template_id)
+    if not admin_dep or int(tpl["department_id"]) != int(admin_dep):
+        raise HTTPException(status_code=403, detail="Нельзя смотреть другую кафедру")
+    return tpl
+
+
+@router.delete("/templates/{form63_template_id}")
+def delete_form63_template(
+    form63_template_id: int,
+    user=Depends(require_roles("admin")),
+):
+    admin_dep = user.get("department_id")
+    tpl = _load_form63_template(form63_template_id)
+    if not admin_dep or int(tpl["department_id"]) != int(admin_dep):
+        raise HTTPException(status_code=403, detail="Нельзя удалять чужую кафедру")
+
+    file_path = tpl["file_path"]
+    deleted_file = False
+    if file_path:
+        try:
+            p = safe_resolve_in_dir(file_path, FORM63_DIR)
+            if p.exists() and p.is_file():
+                p.unlink()
+                deleted_file = True
+        except Exception:
+            deleted_file = False
+
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM form63_templates WHERE id = %s",
+                    (form63_template_id,),
+                )
+    finally:
+        conn.close()
+
+    return {"status": "ok", "deleted_file": deleted_file}
+
+
+@router.put("/templates/{form63_template_id}/mapping")
+def update_form63_template_mapping(
+    form63_template_id: int,
+    payload: dict,
+    user=Depends(require_roles("admin")),
+):
+    admin_dep = user.get("department_id")
+    tpl = _load_form63_template(form63_template_id)
+    if not admin_dep or int(tpl["department_id"]) != int(admin_dep):
+        raise HTTPException(status_code=403, detail="Нельзя править чужую кафедру")
+
+    column_mapping = payload.get("column_mapping")
+    data_start_row = payload.get("data_start_row")
+
+    if not isinstance(column_mapping, dict) or not column_mapping:
+        raise HTTPException(status_code=400, detail="column_mapping обязателен")
+    if not isinstance(data_start_row, int) or data_start_row < 1:
+        raise HTTPException(status_code=400, detail="data_start_row должен быть положительным")
+
+    missing = missing_required(column_mapping)
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"В маппинге не хватает обязательных колонок: {missing}",
+        )
+
+    conn = get_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE form63_templates
+                    SET column_mapping = %s::jsonb,
+                        data_start_row = %s
+                    WHERE id = %s
+                    """,
+                    (
+                        json.dumps(column_mapping),
+                        data_start_row,
+                        form63_template_id,
+                    ),
+                )
+    finally:
+        conn.close()
+
+    return {"status": "ok"}
+
+
+# ---------- export ----------
 
 @router.get("/export-simple")
 def form63_export_simple(excel_template_id: int):
@@ -204,21 +475,28 @@ def form63_export_simple(excel_template_id: int):
 
 
 @router.get("/export-template")
-def form63_export_template(excel_template_id: int):
+def form63_export_template(
+    excel_template_id: int,
+    form63_template_id: int,
+):
     try:
+        tpl = _load_form63_template(form63_template_id)
         items = _build_form63_preview_rows(excel_template_id)
         form63_rows = build_form63_rows_from_preview(items)
 
-        template_path = "backend/app/templates/form63_template.xlsx"
         output_dir = Path("backend/generated/form63")
         output_dir.mkdir(parents=True, exist_ok=True)
-
-        output_path = output_dir / f"form63_template_{excel_template_id}.xlsx"
+        output_path = (
+            output_dir
+            / f"form63_excel_{excel_template_id}_tpl_{form63_template_id}.xlsx"
+        )
 
         export_form63_from_template(
             rows=form63_rows,
-            template_path=template_path,
+            template_path=tpl["file_path"],
             output_path=str(output_path),
+            column_mapping=tpl["column_mapping"],
+            data_start_row=tpl["data_start_row"],
         )
 
         return FileResponse(
@@ -226,6 +504,8 @@ def form63_export_template(excel_template_id: int):
             filename=output_path.name,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+    except HTTPException:
+        raise
     except Exception as e:
         return {
             "status": "error",
