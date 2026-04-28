@@ -13,6 +13,8 @@
 DROP TABLE IF EXISTS generation_history CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 
+DROP TABLE IF EXISTS form63_templates CASCADE;
+
 DROP TABLE IF EXISTS teacher_manual_loop_cell_values CASCADE;
 DROP TABLE IF EXISTS teacher_manual_loop_rows CASCADE;
 DROP TABLE IF EXISTS teacher_manual_static_cell_values CASCADE;
@@ -455,6 +457,48 @@ ON generation_history(generated_by_user_id, created_at DESC);
 
 CREATE INDEX ix_gen_hist_department_time
 ON generation_history(department_id, created_at DESC);
+
+-- =========================
+-- FORM 63 TEMPLATES
+-- A Form 63 template is an XLSX uploaded by an admin.
+-- The system parses its header zone and stores a mapping of
+-- column letters per known data category, plus the data start row.
+-- This way templates can change layout year over year and the generator
+-- still knows where to write each value.
+-- =========================
+CREATE TABLE form63_templates (
+    id BIGSERIAL PRIMARY KEY,
+    department_id BIGINT NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+    academic_year TEXT NOT NULL,
+
+    file_path TEXT NOT NULL,
+    source_filename TEXT,
+
+    -- {"teacher_name": "D", "position": "G", "semester": "J",
+    --  "teaching_auditory": "K", "teaching_extraauditory": "L",
+    --  "methodical": "M", "research": "N", "organizational_methodical": "O",
+    --  "educational": "P", "qualification": "Q", "social": "R",
+    --  "total": "S", "hourly_auditory": "T", "hourly_extraauditory": "U",
+    --  "row_number": "C"}
+    column_mapping JSONB NOT NULL,
+
+    -- first row where teacher data begins (e.g. 16)
+    data_start_row INTEGER NOT NULL,
+
+    -- arbitrary debugging/preview info from the parser
+    detection_meta JSONB,
+
+    status TEXT NOT NULL DEFAULT 'parsed',
+    error_text TEXT,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT ck_form63_status CHECK (status IN ('parsed','error')),
+    CONSTRAINT uq_form63_dept_year UNIQUE (department_id, academic_year)
+);
+
+CREATE INDEX ix_form63_templates_dept
+ON form63_templates(department_id);
 
 -- =========================
 -- SEED
