@@ -140,25 +140,25 @@
   gap: 18px;
 }
 
-.field-block {
+.login-page .field-block {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.field-label {
+.login-page .field-label {
   font-size: 14px;
   font-weight: 600;
   color: #e8f0ff;
 }
 
-.input-wrap {
+.login-page .input-wrap {
   position: relative;
   display: flex;
   align-items: center;
 }
 
-.input {
+.login-page .input {
   width: 100%;
   height: 56px;
   border-radius: 16px;
@@ -172,16 +172,16 @@
   backdrop-filter: blur(8px);
 }
 
-.input::placeholder {
+.login-page .input::placeholder {
   color: rgba(235, 242, 255, 0.45);
 }
 
-.input:hover {
+.login-page .input:hover {
   border-color: rgba(255,255,255,0.22);
   background: rgba(255,255,255,0.1);
 }
 
-.input:focus {
+.login-page .input:focus {
   border-color: rgba(106, 167, 255, 0.8);
   box-shadow:
     0 0 0 4px rgba(79, 140, 255, 0.16),

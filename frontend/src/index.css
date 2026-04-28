@@ -121,7 +121,14 @@ a{
   padding: 11px 12px;
   outline: none;
   background: #fff;
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
+  caret-color: var(--text);
   transition: 140ms ease;
+}
+
+.input::placeholder{
+  color: #7c8aa5;
 }
 
 .input:focus{
