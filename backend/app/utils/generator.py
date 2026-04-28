@@ -9,6 +9,7 @@ from backend.app.config import GENERATED_DIR
 from backend.app.database import get_connection
 from backend.app.utils.manual_docx_filler import apply_manual_fill_to_generated_docx
 from backend.app.utils.teaching_load import (
+    build_effective_generation_settings,
     build_teaching_load_context,
     build_teaching_load_summary,
     get_teaching_load_binding,
@@ -80,6 +81,10 @@ def _normalize_text(value: Any) -> str:
     if value is None:
         return ""
     return re.sub(r"\s+", " ", str(value)).strip()
+
+
+def _normalize_text_lower(value: Any) -> str:
+    return _normalize_text(value).lower()
 
 
 def _to_str(value: Any) -> str:
@@ -219,7 +224,7 @@ def _get_settings_for_excel(cur, excel_template_id: int) -> Dict[str, Any]:
     )
     row = cur.fetchone()
     if not row:
-        raise Exception("Нет настроек для этого Excel. Сначала сохрани Settings.")
+        return {}
     return row[0] or {}
 
 
@@ -310,6 +315,106 @@ def _build_excel_context(
         settings_cfg=settings_cfg,
         academic_year=academic_year,
     )
+
+
+def _short_teacher_name(full_name: str) -> str:
+    parts = [part for part in _normalize_text(full_name).split(" ") if part]
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    initials = "".join(f"{part[0]}." for part in parts[1:] if part)
+    return f"{parts[0]} {initials}".strip()
+
+
+def _academic_year_label(academic_year: str) -> str:
+    match = re.match(r"^\s*(\d{4})\s*[-/]\s*(\d{4})\s*$", str(academic_year or "").strip())
+    if not match:
+        return str(academic_year or "")
+    return f"{match.group(1)} - {match.group(2)} оқу жылы/ учебный год/ academic year"
+
+
+def _profile_field_value(teacher: Dict[str, Any], field_key: str) -> str:
+    if field_key == "staff_type":
+        return _to_str(teacher.get("staff_type"))
+    if field_key == "position":
+        return _to_str(teacher.get("position"))
+    if field_key == "academic_degree":
+        degree = _to_str(teacher.get("academic_degree"))
+        rank = _to_str(teacher.get("academic_rank"))
+        if degree and rank and degree != rank:
+            return f"{degree}, {rank}"
+        return degree or rank
+    if field_key == "full_name":
+        return _short_teacher_name(_to_str(teacher.get("full_name")))
+    if field_key == "department":
+        return _to_str(teacher.get("department"))
+    if field_key == "faculty":
+        return _to_str(teacher.get("faculty"))
+    return ""
+
+
+def _field_patterns() -> Dict[str, Tuple[str, ...]]:
+    return {
+        "staff_type": ("штаттағы", "штатный", "совместитель", "staff, part-time"),
+        "position": ("должность", "position"),
+        "academic_degree": ("уч.степень", "звание", "academic degree", "academic rank"),
+        "full_name": ("фио преподавателя", "last name, name, patronymic"),
+        "department": ("кафедра", "department"),
+        "faculty": ("факультет", "faculty"),
+    }
+
+
+def _match_profile_field(text: str) -> Optional[str]:
+    norm_text = _normalize_text_lower(text)
+    if not norm_text:
+        return None
+    for field_key, patterns in _field_patterns().items():
+        if any(pattern in norm_text for pattern in patterns):
+            return field_key
+    return None
+
+
+def _fill_row_segment(row, start_col: int, end_col: int, value: str) -> None:
+    if start_col >= end_col:
+        return
+    for col_index in range(start_col, end_col):
+        try:
+            row.cells[col_index].text = value
+        except Exception:
+            continue
+
+
+def _render_teacher_profile(doc: Document, teacher: Dict[str, Any], academic_year: str) -> None:
+    academic_year_label = _academic_year_label(academic_year)
+
+    for table in doc.tables:
+        for row in table.rows:
+            row_text = " ".join(_normalize_text(cell.text) for cell in row.cells if _normalize_text(cell.text))
+            if not row_text:
+                continue
+
+            row_text_norm = _normalize_text_lower(row_text)
+            if "оқу жылы" in row_text_norm and "academic year" in row_text_norm:
+                for cell in row.cells:
+                    cell.text = academic_year_label
+                continue
+
+            label_positions: List[Tuple[int, str]] = []
+            for col_index, cell in enumerate(row.cells):
+                field_key = _match_profile_field(cell.text)
+                if field_key:
+                    label_positions.append((col_index, field_key))
+
+            if not label_positions:
+                continue
+
+            for idx, (label_col, field_key) in enumerate(label_positions):
+                next_label_col = label_positions[idx + 1][0] if idx + 1 < len(label_positions) else len(row.cells)
+                value = _profile_field_value(teacher, field_key)
+                if not value:
+                    continue
+                _fill_row_segment(row, label_col + 1, next_label_col, value)
 
 
 def _row_text(table_row) -> str:
@@ -838,6 +943,47 @@ def _render_all_teaching_loads(
     )
 
 
+def _find_overall_total_hours(doc: Document) -> Optional[str]:
+    for table in doc.tables:
+        has_annual_header = any(
+            "за учеб. год" in _normalize_text_lower(cell.text)
+            for row in table.rows[:2]
+            for cell in row.cells
+        )
+        if not has_annual_header:
+            continue
+
+        for row in table.rows:
+            first_cell_text = _normalize_text_lower(row.cells[0].text if row.cells else "")
+            if not first_cell_text:
+                continue
+            if "барлығы" not in first_cell_text and "всего" not in first_cell_text and "total" not in first_cell_text:
+                continue
+
+            numeric_values: List[str] = []
+            for cell in row.cells:
+                text = _normalize_text(cell.text).replace(",", ".")
+                if text and re.fullmatch(r"\d+(?:\.\d+)?", text):
+                    numeric_values.append(text)
+
+            if numeric_values:
+                return numeric_values[-1].replace(".", ",")
+
+    return None
+
+
+def _render_overall_total_hours_paragraph(doc: Document) -> None:
+    total_hours = _find_overall_total_hours(doc)
+    if not total_hours:
+        return
+
+    for paragraph in doc.paragraphs:
+        if "общее количество часов за учебный год" not in _normalize_text_lower(paragraph.text):
+            continue
+        paragraph.text = f"Общее количество часов за учебный год ____________{total_hours}__________________"
+        return
+
+
 def _build_output_path(teacher: Dict[str, Any], academic_year: str) -> str:
     safe_teacher_name = _safe_name(teacher["full_name"]) or f"teacher_{teacher['id']}"
     return str((Path(GENERATED_DIR) / f"IPP_{safe_teacher_name}_{academic_year}.docx").resolve())
@@ -851,12 +997,13 @@ def _load_generation_dependencies(cur, teacher_id: int, department_id: int, acad
     excel_columns = _get_excel_columns(cur, excel["id"])
     excel_rows = _get_excel_rows(cur, excel["id"])
     raw_tables = _get_raw_tables(cur, raw_template["id"])
+    effective_settings_cfg = build_effective_generation_settings(settings_cfg, raw_tables)
 
     return {
         "teacher": teacher,
         "excel": excel,
         "raw_template": raw_template,
-        "settings_cfg": settings_cfg,
+        "settings_cfg": effective_settings_cfg,
         "excel_columns": excel_columns,
         "excel_rows": excel_rows,
         "raw_tables": raw_tables,
@@ -879,8 +1026,11 @@ def _render_generated_doc(
     raw_tables: Dict[int, Dict[str, Any]],
     settings_cfg: Dict[str, Any],
     context: Dict[str, Any],
+    teacher: Dict[str, Any],
+    academic_year: str,
 ) -> Document:
     doc = Document(raw_template_path)
+    _render_teacher_profile(doc, teacher, academic_year)
     _render_all_teaching_loads(
         doc=doc,
         raw_tables=raw_tables,
@@ -912,6 +1062,8 @@ def generate_docx_for_teacher(
             raw_tables=deps["raw_tables"],
             settings_cfg=deps["settings_cfg"],
             context=context,
+            teacher=deps["teacher"],
+            academic_year=academic_year,
         )
 
         output_path = _build_output_path(deps["teacher"], academic_year)
@@ -923,6 +1075,10 @@ def generate_docx_for_teacher(
             academic_year=academic_year,
             output_path=output_path,
         )
+
+        final_doc = Document(output_path)
+        _render_overall_total_hours_paragraph(final_doc)
+        final_doc.save(output_path)
 
         return output_path
     finally:

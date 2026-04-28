@@ -5,10 +5,8 @@ from docx import Document
 
 from backend.app.database import get_connection
 from backend.app.utils.teaching_load import (
-    extract_excel_bound_raw_table_ids,
-    get_teaching_load_summary_binding,
-    is_manual_source_binding,
-    is_teaching_load_summary_raw_table,
+    build_effective_generation_settings,
+    extract_excel_bound_raw_table_ids_with_raw_tables,
 )
 
 
@@ -49,9 +47,9 @@ def _insert_row_after(table, row_index: int):
     return row_index + 1
 
 
-def _insert_row_before(table, row_index: int):
+def _insert_row_before_using_tr(table, row_index: int, source_tr):
     tr = table.rows[row_index]._tr
-    new_tr = deepcopy(tr)
+    new_tr = deepcopy(source_tr)
     tr.addprevious(new_tr)
     return row_index
 
@@ -131,15 +129,10 @@ def _load_generation_settings_config(cur, department_id: int, academic_year: str
     return row[0] or {}
 
 
-def _load_auto_excel_bound_raw_table_ids(
+def _load_raw_tables_meta(
     cur,
     raw_template_id: int,
-    *,
-    include_summary_tables: bool,
-) -> set[int]:
-    if not include_summary_tables:
-        return set()
-
+) -> List[Dict[str, Any]]:
     cur.execute(
         """
         SELECT
@@ -154,19 +147,17 @@ def _load_auto_excel_bound_raw_table_ids(
         """,
         (raw_template_id,),
     )
-    out: set[int] = set()
+    out: List[Dict[str, Any]] = []
 
     for row in cur.fetchall() or []:
-        raw_table = {
+        out.append({
             "id": int(row[0]),
             "table_index": int(row[1] or 0),
             "table_type": row[2] or "",
             "row_count": int(row[3] or 0),
             "col_count": int(row[4] or 0),
             "column_hints": row[5] or [],
-        }
-        if is_teaching_load_summary_raw_table(raw_table):
-            out.add(int(row[0]))
+        })
 
     return out
 
@@ -349,6 +340,44 @@ def _fill_row_cells(row, col_count: int, values_by_col: Dict[int, Any]):
         _set_cell_text(cell, value)
 
 
+def _to_num(value: Any) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value).replace(",", ".").strip())
+    except Exception:
+        return 0.0
+
+
+def _format_num(value: float) -> str:
+    if abs(value - int(value)) < 1e-9:
+        return str(int(value))
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def _fill_loop_total_row(table, total_row_index: int, loop_rows: List[Dict[str, Any]], col_count: int) -> None:
+    if total_row_index is None or col_count <= 0:
+        return
+
+    total_value = 0.0
+    for loop_row in loop_rows:
+        values_by_col = {
+            int(v["col_index"]): v.get("value", "")
+            for v in loop_row.get("values", [])
+        }
+        total_value += _to_num(values_by_col.get(col_count - 1))
+
+    if total_value <= 0:
+        return
+
+    total_cell = _safe_get_cell(table, total_row_index, col_count - 1)
+    if total_cell is None:
+        return
+    _set_cell_text(total_cell, _format_num(total_value))
+
+
 def _apply_loop_table_values(doc: Document, table_item: Dict[str, Any]):
     table = _safe_get_table(doc, int(table_item["table_index"]))
     if table is None:
@@ -370,8 +399,21 @@ def _apply_loop_table_values(doc: Document, table_item: Dict[str, Any]):
         return
 
     total_row_index = _find_total_row_index(table, start_from=template_row_index + 1)
+    source_tr = deepcopy(table.rows[template_row_index]._tr)
 
-    inserted_row_indexes = []
+    if total_row_index is not None:
+        for row_index in range(total_row_index - 1, template_row_index - 1, -1):
+            try:
+                _remove_row(table, row_index)
+            except Exception:
+                continue
+        total_row_index = template_row_index
+    else:
+        for row_index in range(len(table.rows) - 1, template_row_index - 1, -1):
+            try:
+                _remove_row(table, row_index)
+            except Exception:
+                continue
 
     for loop_row in loop_rows:
         values_by_col = {
@@ -380,13 +422,11 @@ def _apply_loop_table_values(doc: Document, table_item: Dict[str, Any]):
         }
 
         if total_row_index is not None:
-            new_index = _insert_row_before(table, total_row_index)
-            inserted_row_indexes.append(new_index)
+            new_index = _insert_row_before_using_tr(table, total_row_index, source_tr)
             total_row_index += 1
         else:
-            anchor_index = inserted_row_indexes[-1] if inserted_row_indexes else template_row_index
+            anchor_index = len(table.rows) - 1
             new_index = _insert_row_after(table, anchor_index)
-            inserted_row_indexes.append(new_index)
 
         try:
             new_row = table.rows[new_index]
@@ -394,11 +434,8 @@ def _apply_loop_table_values(doc: Document, table_item: Dict[str, Any]):
             continue
 
         _fill_row_cells(new_row, col_count, values_by_col)
-
-    try:
-        _remove_row(table, template_row_index)
-    except Exception:
-        pass
+    if total_row_index is not None:
+        _fill_loop_total_row(table, total_row_index, loop_rows, col_count)
 
 
 def apply_manual_fill_to_generated_docx(
@@ -416,18 +453,14 @@ def apply_manual_fill_to_generated_docx(
                 return
 
             settings_cfg = _load_generation_settings_config(cur, department_id, academic_year)
-            excel_bound_raw_table_ids = extract_excel_bound_raw_table_ids(settings_cfg)
-            summary_binding = get_teaching_load_summary_binding(settings_cfg)
-            include_auto_summary_tables = not (
-                summary_binding and is_manual_source_binding(summary_binding)
-            ) and not summary_binding.get("raw_table_id")
-
-            excel_bound_raw_table_ids.update(
-                _load_auto_excel_bound_raw_table_ids(
-                    cur,
-                    raw_template_id,
-                    include_summary_tables=include_auto_summary_tables,
-                )
+            raw_tables_meta = _load_raw_tables_meta(
+                cur,
+                raw_template_id,
+            )
+            effective_settings_cfg = build_effective_generation_settings(settings_cfg, raw_tables_meta)
+            excel_bound_raw_table_ids = extract_excel_bound_raw_table_ids_with_raw_tables(
+                effective_settings_cfg,
+                raw_tables_meta,
             )
 
             static_tables = _load_manual_static_tables(
