@@ -996,6 +996,9 @@ function StaticTableGrid({ table, formValues, onChange, readOnly = false }) {
                                 border: "1px solid #d9e3f5",
                                 borderRadius: 12,
                                 minHeight: 42,
+                                color: "#1f2f4d",
+                                WebkitTextFillColor: "#1f2f4d",
+                                caretColor: "#1f2f4d",
                               }}
                             />
                           </div>
@@ -1252,6 +1255,9 @@ function LoopTableEditor({
                             border: "1px solid #d9e3f5",
                             borderRadius: 12,
                             minHeight: 42,
+                            color: "#1f2f4d",
+                            WebkitTextFillColor: "#1f2f4d",
+                            caretColor: "#1f2f4d",
                           }}
                         />
                       </div>
