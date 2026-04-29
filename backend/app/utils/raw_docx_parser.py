@@ -3,6 +3,9 @@ import re
 from typing import Any, Dict, List, Optional
 
 from docx import Document
+from docx.oxml.table import CT_Tbl
+from docx.oxml.text.paragraph import CT_P
+from docx.text.paragraph import Paragraph
 
 
 SECTION_HEADING_RE = re.compile(
@@ -134,19 +137,51 @@ def _extract_paragraphs_with_order(doc: Document) -> List[dict]:
     return out
 
 
+def _leading_section_number(text: Any) -> Optional[int]:
+    match = re.match(r"^\s*(\d+)", _normalize_text(text))
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except Exception:
+        return None
+
+
+def _best_recent_section_title(recent_paragraphs: List[str], table_index: int) -> str:
+    if not recent_paragraphs:
+        return f"Таблица {table_index + 1}"
+
+    last_text = recent_paragraphs[-1]
+    if len(recent_paragraphs) >= 2:
+        prev_text = recent_paragraphs[-2]
+        if _leading_section_number(prev_text) and not _leading_section_number(last_text) and len(last_text) < 140:
+            return f"{prev_text} {last_text}"
+
+    return last_text
+
+
+def _extract_table_section_titles(doc: Document) -> Dict[int, str]:
+    out: Dict[int, str] = {}
+    recent_paragraphs: List[str] = []
+    table_index = 0
+
+    for child in doc.element.body.iterchildren():
+        if isinstance(child, CT_P):
+            text = _normalize_text(Paragraph(child, doc).text)
+            if text:
+                recent_paragraphs.append(text)
+                recent_paragraphs = recent_paragraphs[-6:]
+            continue
+
+        if isinstance(child, CT_Tbl):
+            out[table_index] = _best_recent_section_title(recent_paragraphs, table_index)
+            table_index += 1
+
+    return out
+
+
 def _find_table_section_title(doc: Document, table_index: int) -> str:
-    section_title = ""
-    paragraphs = _extract_paragraphs_with_order(doc)
-
-    for p in paragraphs:
-        txt = p["text"]
-        if _is_section_heading(txt):
-            section_title = txt
-
-    if section_title:
-        return section_title
-
-    return f"Таблица {table_index + 1}"
+    return _extract_table_section_titles(doc).get(table_index, f"Таблица {table_index + 1}")
 
 
 def _guess_column_hint_text(matrix: List[List[dict]], col_index: int) -> str:
@@ -328,9 +363,10 @@ def _extract_column_hints(matrix: List[List[dict]]) -> List[str]:
 def scan_raw_docx(file_path: str) -> Dict[str, Any]:
     doc = Document(file_path)
     tables_out: List[Dict[str, Any]] = []
+    section_titles = _extract_table_section_titles(doc)
 
     for t_idx, table in enumerate(doc.tables):
-        section_title = _find_table_section_title(doc, t_idx)
+        section_title = section_titles.get(t_idx, f"Таблица {t_idx + 1}")
 
         temp_matrix = []
         for r_idx, row in enumerate(table.rows):

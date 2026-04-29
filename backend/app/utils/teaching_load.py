@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 SEM_RE = re.compile(r"(?:(\d+)\s*(?:сем|semestr|semester))", re.IGNORECASE)
 SCOPE_RE = re.compile(r"(\d+(?:\s*,\s*\d+)*)")
 COURSE_IN_OP_RE = re.compile(r"(\d+)\s*курс", re.IGNORECASE)
+YEAR_RANGE_IN_OP_RE = re.compile(r"(20\d{2})\s*[-–—]\s*(20\d{2})")
 WORKLOAD_VALUE_FIELDS = (
     "l",
     "spz",
@@ -552,14 +553,31 @@ def _parse_academic_year_start(academic_year: str) -> Optional[int]:
         return None
 
 
-def _derive_course_from_op(value: Any) -> str:
+def _derive_course_from_op(value: Any, academic_year: str = "") -> str:
     text = _normalize_text(value)
     if not text:
         return ""
+
     matches = [int(x) for x in COURSE_IN_OP_RE.findall(text)]
-    if not matches:
+    if matches:
+        return str(max(matches))
+
+    current_year = _parse_academic_year_start(academic_year)
+    if current_year is None:
         return ""
-    return str(max(matches))
+
+    range_courses: List[int] = []
+    for start_year, _ in YEAR_RANGE_IN_OP_RE.findall(text):
+        try:
+            course = current_year - int(start_year) + 1
+        except Exception:
+            continue
+        if course > 0:
+            range_courses.append(course)
+
+    if not range_courses:
+        return ""
+    return str(max(range_courses))
 
 
 def _derive_course_from_group(value: Any, academic_year: str) -> str:
@@ -599,7 +617,7 @@ def _derive_course(group_value: Any, op_value: Any, academic_year: str) -> str:
     from_group = _derive_course_from_group(group_value, academic_year)
     if from_group:
         return from_group
-    return _derive_course_from_op(op_value)
+    return _derive_course_from_op(op_value, academic_year)
 
 
 def _matches_patterns(value: Any, patterns: List[str]) -> bool:
