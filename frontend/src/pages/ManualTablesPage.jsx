@@ -63,6 +63,7 @@ export default function ManualTablesPage() {
   const [loopValues, setLoopValues] = useState({});
   const [tableLoopRows, setTableLoopRows] = useState({});
   const [savingLoopRowId, setSavingLoopRowId] = useState("");
+  const [savingLoopTableId, setSavingLoopTableId] = useState(0);
   const [deletingLoopRowId, setDeletingLoopRowId] = useState("");
   const [addingLoopTableId, setAddingLoopTableId] = useState(0);
 
@@ -462,38 +463,47 @@ export default function ManualTablesPage() {
     return newLoopRowId;
   }
 
-  async function saveLoopRow(row, table) {
+  async function _persistAndSaveRow(table, row) {
+    // Capture values before ensurePersistedLoopRow to avoid reading stale state
+    const clientId = row.persisted_loop_row_id || row.loop_row_id;
+    const values = Array.from({ length: Number(table.col_count || 0) }).map(
+      (_, colIndex) => ({
+        col_index: colIndex,
+        value: getLoopRowValue(clientId, colIndex),
+        column_hint_text:
+          table.column_hints?.[colIndex] || `Колонка ${colIndex + 1}`,
+        semantic_key: null,
+      })
+    );
+
+    const actualLoopRowId = await ensurePersistedLoopRow(table, row);
+
+    await api.post("/manual-fill/save-loop-row", {
+      teacher_id: role === "admin" ? teacherId : undefined,
+      loop_row_id: actualLoopRowId,
+      values,
+    });
+  }
+
+  async function saveAllLoopRows(table) {
+    const rows = tableLoopRows[table.id] || [];
+    if (!rows.length) return;
+
     try {
-      setSavingLoopRowId(String(row.loop_row_id));
-      setStatus("Сохранение строки...");
+      setSavingLoopTableId(table.id);
+      setStatus("Сохранение...");
 
-      const actualLoopRowId = await ensurePersistedLoopRow(table, row);
+      for (const row of rows) {
+        await _persistAndSaveRow(table, row);
+      }
 
-      const values = Array.from({ length: Number(table.col_count || 0) }).map(
-        (_, colIndex) => ({
-          col_index: colIndex,
-          value: getLoopRowValue(actualLoopRowId, colIndex),
-          column_hint_text:
-            table.column_hints?.[colIndex] || `Колонка ${colIndex + 1}`,
-          semantic_key: null,
-        })
-      );
-
-      await api.post("/manual-fill/save-loop-row", {
-        teacher_id: role === "admin" ? teacherId : undefined,
-        loop_row_id: actualLoopRowId,
-        values,
-      });
-
-      setStatus("Строка сохранена");
+      setStatus("Сохранено");
       await loadForm(rawTemplateId, teacherId);
     } catch (e) {
       console.error(e);
-      setStatus(
-        e?.response?.data?.detail || e?.message || "Ошибка сохранения строки"
-      );
+      setStatus(e?.response?.data?.detail || e?.message || "Ошибка сохранения");
     } finally {
-      setSavingLoopRowId("");
+      setSavingLoopTableId(0);
     }
   }
 
@@ -657,7 +667,7 @@ export default function ManualTablesPage() {
               style={{
                 marginTop: 0,
                 marginBottom: 12,
-                fontSize: 32,
+                fontSize: 25,
                 fontWeight: 800,
                 color: "#17356f",
                 letterSpacing: "-0.02em",
@@ -831,10 +841,11 @@ export default function ManualTablesPage() {
                         getLoopRowValue={getLoopRowValue}
                         setLoopRowValue={setLoopRowValue}
                         onAddRow={() => addLoopRow(table)}
-                        onSaveRow={(row) => saveLoopRow(row, table)}
+                        onSaveTable={() => saveAllLoopRows(table)}
                         onDeleteRow={(row) => deleteLoopRow(row, table.id)}
                         addingLoopTableId={addingLoopTableId}
-                        savingLoopRowId={savingLoopRowId}
+                        savingLoopTableId={savingLoopTableId}
+                        savingThisTable={savingLoopTableId === table.id}
                         deletingLoopRowId={deletingLoopRowId}
                         readOnly={!!table.excel_bound}
                       />
@@ -1034,10 +1045,10 @@ function LoopTableEditor({
   getLoopRowValue,
   setLoopRowValue,
   onAddRow,
-  onSaveRow,
+  onSaveTable,
   onDeleteRow,
   addingLoopTableId,
-  savingLoopRowId,
+  savingThisTable,
   deletingLoopRowId,
   readOnly = false,
 }) {
@@ -1074,7 +1085,7 @@ function LoopTableEditor({
         </div>
       </div>
 
-      <div className="actions-row" style={{ marginTop: 12 }}>
+      <div className="actions-row" style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
         <button
           className="btn btn-primary"
           onClick={onAddRow}
@@ -1089,6 +1100,25 @@ function LoopTableEditor({
         >
           {addingLoopTableId === table.id ? "Добавление..." : "Добавить строку"}
         </button>
+
+        {!readOnly && (
+          <button
+            className="btn btn-primary"
+            onClick={onSaveTable}
+            disabled={savingThisTable || !rows?.length}
+            style={{
+              minWidth: 170,
+              height: 46,
+              borderRadius: 14,
+              fontWeight: 700,
+              boxShadow: "0 12px 24px rgba(58,110,255,0.18)",
+              background: savingThisTable ? undefined : "#1a7f52",
+              borderColor: savingThisTable ? undefined : "#1a7f52",
+            }}
+          >
+            {savingThisTable ? "Сохранение..." : "Сохранить таблицу"}
+          </button>
+        )}
       </div>
 
       {readOnly ? (
@@ -1170,23 +1200,6 @@ function LoopTableEditor({
                 </div>
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => onSaveRow(row)}
-                    disabled={readOnly || savingLoopRowId === String(row.loop_row_id)}
-                    style={{
-                      minWidth: 130,
-                      height: 42,
-                      borderRadius: 12,
-                      fontWeight: 700,
-                      boxShadow: "0 12px 24px rgba(58,110,255,0.18)",
-                    }}
-                  >
-                    {savingLoopRowId === String(row.loop_row_id)
-                      ? "Сохранение..."
-                      : "Сохранить"}
-                  </button>
-
                   <button
                     className="btn btn-danger"
                     onClick={() => onDeleteRow(row)}
