@@ -2,6 +2,74 @@ import re
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
+SNAPSHOT_COLUMNS = [
+    "id",
+    "teacher_id",
+    "academic_year",
+    "raw_template_id",
+    "raw_table_id",
+    "department_id",
+    "section_title",
+    "table_type",
+    "header_signature",
+    "column_hints",
+    "table_fingerprint",
+    "source_mode",
+    "prefilled_from_snapshot_id",
+    "created_at",
+    "updated_at",
+]
+
+STATIC_CELL_COLUMNS = [
+    "id",
+    "snapshot_id",
+    "raw_cell_id",
+    "row_index",
+    "col_index",
+    "cell_key",
+    "semantic_key",
+    "row_signature",
+    "column_hint_text",
+    "value_text",
+    "created_at",
+    "updated_at",
+]
+
+LOOP_ROW_COLUMNS = [
+    "id",
+    "snapshot_id",
+    "row_order",
+    "created_at",
+    "updated_at",
+]
+
+LOOP_CELL_COLUMNS = [
+    "id",
+    "loop_row_id",
+    "col_index",
+    "column_hint_text",
+    "semantic_key",
+    "value_text",
+    "created_at",
+    "updated_at",
+]
+
+
+def _row_to_dict(row: Any, columns: List[str]) -> Dict[str, Any]:
+    if row is None:
+        return {}
+
+    if isinstance(row, dict):
+        return {col: row.get(col) for col in columns}
+
+    if hasattr(row, "keys"):
+        return {col: row[col] for col in columns}
+
+    return {
+        col: row[idx] if idx < len(row) else None
+        for idx, col in enumerate(columns)
+    }
+
 
 def _norm(x: Any) -> str:
     if x is None:
@@ -195,7 +263,10 @@ def find_best_previous_snapshot(
         """,
         (teacher_id, prev_year),
     )
-    candidates = cur.fetchall() or []
+    candidates = [
+        _row_to_dict(row, SNAPSHOT_COLUMNS)
+        for row in (cur.fetchall() or [])
+    ]
 
     best = None
     best_score = -1.0
@@ -236,7 +307,10 @@ def load_previous_static_cells(cur, snapshot_id: int) -> List[Dict[str, Any]]:
         """,
         (snapshot_id,),
     )
-    return cur.fetchall() or []
+    return [
+        _row_to_dict(row, STATIC_CELL_COLUMNS)
+        for row in (cur.fetchall() or [])
+    ]
 
 
 def load_previous_loop_rows(cur, snapshot_id: int) -> List[Dict[str, Any]]:
@@ -254,7 +328,10 @@ def load_previous_loop_rows(cur, snapshot_id: int) -> List[Dict[str, Any]]:
         """,
         (snapshot_id,),
     )
-    rows = cur.fetchall() or []
+    rows = [
+        _row_to_dict(row, LOOP_ROW_COLUMNS)
+        for row in (cur.fetchall() or [])
+    ]
 
     out: List[Dict[str, Any]] = []
 
@@ -276,7 +353,10 @@ def load_previous_loop_rows(cur, snapshot_id: int) -> List[Dict[str, Any]]:
             """,
             (row["id"],),
         )
-        cells = cur.fetchall() or []
+        cells = [
+            _row_to_dict(cell, LOOP_CELL_COLUMNS)
+            for cell in (cur.fetchall() or [])
+        ]
 
         out.append({
             "id": row["id"],
