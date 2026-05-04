@@ -17,6 +17,10 @@ from backend.app.utils.form63_template_parser import (
     missing_required,
     parse_form63_template,
 )
+from backend.app.utils.iup_summary_extractor import (
+    CATEGORY_FIELDS as IUP_CATEGORY_FIELDS,
+    extract_summary_for_teacher,
+)
 from backend.app.utils.storage import safe_resolve_in_dir, save_upload_file
 
 router = APIRouter(prefix="/form63", tags=["Form63"])
@@ -91,7 +95,61 @@ def _classify_form63_row(row_data: dict) -> str:
     return "other"
 
 
+def _lookup_excel_template_meta(cur, excel_template_id: int) -> dict | None:
+    cur.execute(
+        """
+        SELECT id, department_id, academic_year
+        FROM excel_templates
+        WHERE id = %s
+        """,
+        (excel_template_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    return {"id": row[0], "department_id": row[1], "academic_year": row[2]}
+
+
+def _lookup_teachers_by_name(cur, department_id: int) -> dict[str, int]:
+    """Build a name -> teacher_id map for a department. Names are normalized."""
+    cur.execute(
+        """
+        SELECT id, full_name
+        FROM teachers
+        WHERE department_id = %s
+        """,
+        (department_id,),
+    )
+    out: dict[str, int] = {}
+    for tid, full_name in cur.fetchall():
+        if full_name:
+            out[" ".join(full_name.split()).strip().lower()] = tid
+    return out
+
+
+def _normalize_teacher_name(name: str | None) -> str:
+    if not name:
+        return ""
+    return " ".join(str(name).split()).strip().lower()
+
+
 def _build_form63_preview_rows(excel_template_id: int) -> list[dict]:
+    """
+    Aggregate per-teacher per-semester hours for Form 63.
+
+    Two data sources, in this order of trust:
+
+    1. The IUP summary table (T11 in the docx). When a teacher has filled
+       their IUP, the planned hours per category are taken straight from
+       there — that is what gets signed off on, so it overrides everything
+       else for K..R. This handles all of teaching_auditory,
+       teaching_extraauditory, methodical, research, organizational_methodical,
+       educational, qualification, social.
+
+    2. The teaching-load Excel. Used as a fallback for K and L when the IUP
+       isn't filled, and always for T (hourly_auditory) and U
+       (hourly_extraauditory) since T11 has no hourly section.
+    """
     conn = None
     cur = None
 
@@ -99,19 +157,29 @@ def _build_form63_preview_rows(excel_template_id: int) -> list[dict]:
         conn = get_connection()
         cur = conn.cursor()
 
-        cur.execute("""
+        excel_meta = _lookup_excel_template_meta(cur, excel_template_id)
+        if not excel_meta:
+            return []
+        department_id = excel_meta["department_id"]
+        academic_year = excel_meta["academic_year"]
+
+        cur.execute(
+            """
             SELECT row_number, row_data
             FROM excel_rows
             WHERE template_id = %s
             ORDER BY row_number
-        """, (excel_template_id,))
+            """,
+            (excel_template_id,),
+        )
         rows = cur.fetchall()
 
-        grouped = {}
+        # First pass: build Excel-based aggregation.
+        # Keyed by (teacher_name, position, semester) so each row in Form 63
+        # represents one (teacher, semester) pair.
+        grouped: dict[tuple, dict] = {}
 
-        for row in rows:
-            row_number, row_data = row
-
+        for row_number, row_data in rows:
             teacher_name = row_data.get("ФИО ППС")
             position = row_data.get("Должность")
             semester = _detect_semester(row_data)
@@ -135,6 +203,8 @@ def _build_form63_preview_rows(excel_template_id: int) -> list[dict]:
                     "qualification_hours": 0.0,
                     "social_hours": 0.0,
                     "hourly_auditory_hours": 0.0,
+                    "hourly_extraauditory_hours": 0.0,
+                    "_iup_filled": False,
                 }
 
             category = _classify_form63_row(row_data)
@@ -147,6 +217,49 @@ def _build_form63_preview_rows(excel_template_id: int) -> list[dict]:
                 grouped[key]["teaching_extraauditory_hours"] += staff_hours
             elif category == "hourly_auditory":
                 grouped[key]["hourly_auditory_hours"] += hourly_hours
+
+        # Second pass: pull IUP summary values per teacher and override K..R
+        # where the teacher has filled their IUP.
+        teacher_name_to_id = _lookup_teachers_by_name(cur, department_id)
+        iup_cache: dict[int, dict[str, dict[str, float]]] = {}
+
+        for key, item in grouped.items():
+            teacher_id = teacher_name_to_id.get(_normalize_teacher_name(item["teacher_name"]))
+            if not teacher_id:
+                continue
+
+            if teacher_id not in iup_cache:
+                iup_cache[teacher_id] = extract_summary_for_teacher(
+                    conn, teacher_id, academic_year
+                )
+
+            iup_summary = iup_cache[teacher_id]
+            if not iup_summary:
+                continue
+
+            # Treat the IUP summary as "filled" only if there is at least one
+            # non-zero plan value across both semesters. An all-zero summary
+            # likely means the snapshot exists but the teacher hasn't entered
+            # anything yet — in that case the Excel-derived values are better
+            # than overwriting them with zeros.
+            total_signal = sum(
+                (bucket.get("sem1") or 0) + (bucket.get("sem2") or 0)
+                for bucket in iup_summary.values()
+            )
+            if total_signal <= 0:
+                continue
+
+            sem_key = "sem1" if item["semester"] == 1 else "sem2"
+            for category, field_name in IUP_CATEGORY_FIELDS.items():
+                bucket = iup_summary.get(category)
+                if not bucket:
+                    continue
+                value = bucket.get(sem_key)
+                if value is None:
+                    continue
+                item[field_name] = float(value)
+
+            item["_iup_filled"] = True
 
         items = list(grouped.values())
         items.sort(key=lambda x: (x["teacher_name"], x["semester"]))
@@ -215,6 +328,41 @@ def form63_preview(excel_template_id: int):
             "status": "error",
             "detail": str(e),
         }
+
+
+@router.get("/iup-status")
+def form63_iup_status(excel_template_id: int):
+    """
+    Per-teacher IUP fill status for the given Excel teaching-load template.
+
+    For each teacher present in the Excel file, report whether their IUP
+    summary (T11) has been filled. The UI uses this to warn that any teacher
+    without a filled IUP will get K..R values from the Excel fallback only.
+    """
+    try:
+        items = _build_form63_preview_rows(excel_template_id)
+        teachers: dict[str, bool] = {}
+        for item in items:
+            name = item["teacher_name"]
+            # if any of the two semester rows for this teacher has IUP data
+            # we consider the teacher "filled".
+            teachers[name] = teachers.get(name, False) or bool(item.get("_iup_filled"))
+
+        teacher_list = sorted(
+            [{"teacher_name": n, "iup_filled": flag} for n, flag in teachers.items()],
+            key=lambda x: x["teacher_name"],
+        )
+        filled_count = sum(1 for t in teacher_list if t["iup_filled"])
+
+        return {
+            "status": "ok",
+            "total_teachers": len(teacher_list),
+            "teachers_with_iup": filled_count,
+            "teachers_without_iup": len(teacher_list) - filled_count,
+            "teachers": teacher_list,
+        }
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
 
 
 # ---------- form63 templates: upload / list / delete / mapping ----------
