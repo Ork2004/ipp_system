@@ -129,7 +129,11 @@ def _load_raw_tables(cur, raw_template_id: int) -> List[Dict[str, Any]]:
             has_total_row,
             loop_template_row_index,
             column_hints,
-            table_fingerprint
+            table_fingerprint,
+            stable_section_key,
+            stable_structure_key,
+            stable_table_key,
+            stable_column_keys
         FROM raw_docx_tables
         WHERE template_id = %s
         ORDER BY table_index;
@@ -152,6 +156,10 @@ def _load_raw_tables(cur, raw_template_id: int) -> List[Dict[str, Any]]:
             "loop_template_row_index": row[8] if row[8] is None else int(row[8]),
             "column_hints": row[9] or [],
             "table_fingerprint": row[10] or "",
+            "stable_section_key": row[11] or "",
+            "stable_structure_key": row[12] or "",
+            "stable_table_key": row[13] or "",
+            "stable_column_keys": row[14] or [],
             "editable_cells": [],
         }
 
@@ -164,6 +172,8 @@ def _load_raw_tables(cur, raw_template_id: int) -> List[Dict[str, Any]]:
                 cell_key,
                 original_text,
                 semantic_key,
+                stable_cell_key,
+                stable_column_key,
                 row_signature,
                 column_hint_text,
                 is_editable
@@ -175,7 +185,7 @@ def _load_raw_tables(cur, raw_template_id: int) -> List[Dict[str, Any]]:
         )
         for cell_row in cur.fetchall() or []:
             original_text = cell_row[4] or ""
-            is_fillable = bool(cell_row[8]) or (
+            is_fillable = bool(cell_row[10]) or (
                 raw_table["table_type"] == "static" and _looks_like_placeholder_cell(original_text)
             )
             if not is_fillable:
@@ -187,8 +197,10 @@ def _load_raw_tables(cur, raw_template_id: int) -> List[Dict[str, Any]]:
                     "col_index": int(cell_row[2]),
                     "cell_key": cell_row[3],
                     "semantic_key": cell_row[5],
-                    "row_signature": cell_row[6],
-                    "column_hint_text": cell_row[7],
+                    "stable_cell_key": cell_row[6],
+                    "stable_column_key": cell_row[7],
+                    "row_signature": cell_row[8],
+                    "column_hint_text": cell_row[9],
                 }
             )
 
@@ -231,12 +243,16 @@ def _create_snapshot(
             header_signature,
             column_hints,
             table_fingerprint,
+            stable_section_key,
+            stable_structure_key,
+            stable_table_key,
+            stable_column_keys,
             source_mode,
             prefilled_from_snapshot_id,
             created_at,
             updated_at
         )
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'manual',NULL,now(),now())
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'manual',NULL,now(),now())
         RETURNING id;
         """,
         (
@@ -250,6 +266,10 @@ def _create_snapshot(
             raw_table.get("header_signature"),
             Json(raw_table.get("column_hints") or []),
             raw_table.get("table_fingerprint"),
+            raw_table.get("stable_section_key"),
+            raw_table.get("stable_structure_key"),
+            raw_table.get("stable_table_key"),
+            Json(raw_table.get("stable_column_keys") or []),
         ),
     )
     return int(cur.fetchone()[0])
@@ -271,6 +291,7 @@ def _extract_loop_rows(raw_table: Dict[str, Any], filled_table) -> List[Dict[str
     end_row = total_row_index if total_row_index is not None else len(filled_table.rows)
     col_count = int(raw_table.get("col_count") or 0)
     column_hints = raw_table.get("column_hints") or []
+    stable_column_keys = raw_table.get("stable_column_keys") or []
 
     out: List[Dict[str, Any]] = []
     for row_index in range(start_row, end_row):
@@ -289,6 +310,7 @@ def _extract_loop_rows(raw_table: Dict[str, Any], filled_table) -> List[Dict[str
             values.append(
                 {
                     "col_index": col_index,
+                    "stable_column_key": stable_column_keys[col_index] if col_index < len(stable_column_keys) else None,
                     "column_hint_text": column_hints[col_index] if col_index < len(column_hints) else f"Колонка {col_index + 1}",
                     "value": text,
                 }
@@ -365,13 +387,15 @@ def import_manual_docx(
                                     col_index,
                                     cell_key,
                                     semantic_key,
+                                    stable_cell_key,
+                                    stable_column_key,
                                     row_signature,
                                     column_hint_text,
                                     value_text,
                                     created_at,
                                     updated_at
                                 )
-                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,now(),now());
+                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now(),now());
                                 """,
                                 (
                                     snapshot_id,
@@ -380,6 +404,8 @@ def import_manual_docx(
                                     item["col_index"],
                                     item["cell_key"],
                                     item["semantic_key"],
+                                    item["stable_cell_key"],
+                                    item["stable_column_key"],
                                     item["row_signature"],
                                     item["column_hint_text"],
                                     item["value"],
@@ -414,17 +440,19 @@ def import_manual_docx(
                                     col_index,
                                     column_hint_text,
                                     semantic_key,
+                                    stable_column_key,
                                     value_text,
                                     created_at,
                                     updated_at
                                 )
-                                VALUES (%s,%s,%s,%s,%s,now(),now());
+                                VALUES (%s,%s,%s,%s,%s,%s,now(),now());
                                 """,
                                 (
                                     loop_row_id,
                                     cell["col_index"],
                                     cell["column_hint_text"],
                                     None,
+                                    cell.get("stable_column_key"),
                                     cell["value"],
                                 ),
                             )

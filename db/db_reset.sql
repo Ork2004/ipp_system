@@ -231,6 +231,12 @@ CREATE TABLE raw_docx_tables (
     loop_template_row_index INTEGER,
     column_hints JSONB,
 
+    -- dynamic structure keys, generated from the uploaded file itself
+    stable_section_key TEXT NOT NULL,
+    stable_structure_key TEXT NOT NULL,
+    stable_table_key TEXT NOT NULL,
+    stable_column_keys JSONB,
+
     editable_cells_count INTEGER NOT NULL DEFAULT 0,
     prefilled_cells_count INTEGER NOT NULL DEFAULT 0,
 
@@ -252,6 +258,15 @@ ON raw_docx_tables(template_id);
 
 CREATE INDEX ix_raw_docx_tables_fingerprint
 ON raw_docx_tables(table_fingerprint);
+
+CREATE INDEX ix_raw_docx_tables_stable_section_key
+ON raw_docx_tables(stable_section_key);
+
+CREATE INDEX ix_raw_docx_tables_stable_structure_key
+ON raw_docx_tables(stable_structure_key);
+
+CREATE INDEX ix_raw_docx_tables_stable_table_key
+ON raw_docx_tables(stable_table_key);
 
 CREATE INDEX ix_raw_docx_tables_section_title
 ON raw_docx_tables(section_title);
@@ -275,6 +290,8 @@ CREATE TABLE raw_docx_cells (
 
     -- optional semantic helper fields for future smarter matching
     semantic_key TEXT,
+    stable_cell_key TEXT,
+    stable_column_key TEXT,
     row_signature TEXT,
     column_hint_text TEXT,
 
@@ -290,6 +307,12 @@ ON raw_docx_cells(table_id);
 
 CREATE INDEX ix_raw_docx_cells_semantic_key
 ON raw_docx_cells(semantic_key);
+
+CREATE INDEX ix_raw_docx_cells_stable_cell_key
+ON raw_docx_cells(stable_cell_key);
+
+CREATE INDEX ix_raw_docx_cells_stable_column_key
+ON raw_docx_cells(stable_column_key);
 
 -- =========================
 -- MANUAL DATA SNAPSHOTS
@@ -315,6 +338,10 @@ CREATE TABLE teacher_manual_table_snapshots (
     header_signature TEXT,
     column_hints JSONB,
     table_fingerprint TEXT NOT NULL,
+    stable_section_key TEXT NOT NULL,
+    stable_structure_key TEXT NOT NULL,
+    stable_table_key TEXT NOT NULL,
+    stable_column_keys JSONB,
 
     -- tells whether snapshot was created manually or prefilled from previous year
     source_mode TEXT NOT NULL DEFAULT 'manual', -- manual | prefilled | mixed
@@ -339,6 +366,15 @@ ON teacher_manual_table_snapshots(teacher_id, table_fingerprint);
 CREATE INDEX ix_manual_snapshots_fingerprint
 ON teacher_manual_table_snapshots(table_fingerprint);
 
+CREATE INDEX ix_manual_snapshots_stable_section_key
+ON teacher_manual_table_snapshots(stable_section_key);
+
+CREATE INDEX ix_manual_snapshots_stable_structure_key
+ON teacher_manual_table_snapshots(stable_structure_key);
+
+CREATE INDEX ix_manual_snapshots_stable_table_key
+ON teacher_manual_table_snapshots(stable_table_key);
+
 CREATE INDEX ix_manual_snapshots_section_type
 ON teacher_manual_table_snapshots(section_title, table_type);
 
@@ -360,6 +396,8 @@ CREATE TABLE teacher_manual_static_cell_values (
 
     cell_key VARCHAR(128),
     semantic_key TEXT,
+    stable_cell_key TEXT,
+    stable_column_key TEXT,
     row_signature TEXT,
     column_hint_text TEXT,
 
@@ -376,6 +414,12 @@ ON teacher_manual_static_cell_values(snapshot_id);
 
 CREATE INDEX ix_manual_static_semantic_key
 ON teacher_manual_static_cell_values(semantic_key);
+
+CREATE INDEX ix_manual_static_stable_cell_key
+ON teacher_manual_static_cell_values(stable_cell_key);
+
+CREATE INDEX ix_manual_static_stable_column_key
+ON teacher_manual_static_cell_values(stable_column_key);
 
 -- =========================
 -- LOOP ROWS
@@ -406,6 +450,7 @@ CREATE TABLE teacher_manual_loop_cell_values (
     col_index INTEGER NOT NULL,
     column_hint_text TEXT,
     semantic_key TEXT,
+    stable_column_key TEXT,
 
     value_text TEXT,
 
@@ -420,6 +465,9 @@ ON teacher_manual_loop_cell_values(loop_row_id);
 
 CREATE INDEX ix_manual_loop_cells_semantic_key
 ON teacher_manual_loop_cell_values(semantic_key);
+
+CREATE INDEX ix_manual_loop_cells_stable_column_key
+ON teacher_manual_loop_cell_values(stable_column_key);
 
 -- =========================
 -- GENERATION HISTORY
