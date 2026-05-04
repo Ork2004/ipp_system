@@ -473,6 +473,7 @@ export default function ManualTablesPage() {
         column_hint_text:
           table.column_hints?.[colIndex] || `Колонка ${colIndex + 1}`,
         semantic_key: null,
+        stable_column_key: table.stable_column_keys?.[colIndex] || null,
       })
     );
 

@@ -110,6 +110,10 @@ def _load_raw_table(cur, raw_table_id: int):
             t.loop_template_row_index,
             t.column_hints,
             t.table_fingerprint,
+            t.stable_section_key,
+            t.stable_structure_key,
+            t.stable_table_key,
+            t.stable_column_keys,
             t.structure_meta,
             t.extra_meta
         FROM raw_docx_tables t
@@ -132,8 +136,12 @@ def _load_raw_table(cur, raw_table_id: int):
         "loop_template_row_index": row[9],
         "column_hints": row[10] or [],
         "table_fingerprint": row[11],
-        "structure_meta": row[12] or {},
-        "extra_meta": row[13] or {},
+        "stable_section_key": row[12],
+        "stable_structure_key": row[13],
+        "stable_table_key": row[14],
+        "stable_column_keys": row[15] or [],
+        "structure_meta": row[16] or {},
+        "extra_meta": row[17] or {},
     }
 
 
@@ -150,6 +158,8 @@ def _load_raw_table_matrix(cur, raw_table_id: int):
             c.is_editable,
             c.cell_kind,
             c.semantic_key,
+            c.stable_cell_key,
+            c.stable_column_key,
             c.row_signature,
             c.column_hint_text
         FROM raw_docx_cells c
@@ -172,8 +182,10 @@ def _load_raw_table_matrix(cur, raw_table_id: int):
         is_editable = c[7]
         cell_kind = c[8]
         semantic_key = c[9]
-        row_signature = c[10]
-        column_hint_text = c[11]
+        stable_cell_key = c[10]
+        stable_column_key = c[11]
+        row_signature = c[12]
+        column_hint_text = c[13]
 
         cell_item = {
             "raw_cell_id": raw_cell_id,
@@ -186,6 +198,8 @@ def _load_raw_table_matrix(cur, raw_table_id: int):
             "editable": is_editable,
             "cell_kind": cell_kind,
             "semantic_key": semantic_key,
+            "stable_cell_key": stable_cell_key,
+            "stable_column_key": stable_column_key,
             "row_signature": row_signature,
             "column_hint_text": column_hint_text,
             "saved_value": "",
@@ -200,6 +214,8 @@ def _load_raw_table_matrix(cur, raw_table_id: int):
                 "col_index": col_index,
                 "cell_key": cell_key,
                 "semantic_key": semantic_key,
+                "stable_cell_key": stable_cell_key,
+                "stable_column_key": stable_column_key,
                 "row_signature": row_signature,
                 "column_hint_text": column_hint_text,
                 "value": "",
@@ -223,6 +239,10 @@ def _load_current_snapshot(cur, teacher_id: int, academic_year: str, raw_table_i
             header_signature,
             column_hints,
             table_fingerprint,
+            stable_section_key,
+            stable_structure_key,
+            stable_table_key,
+            stable_column_keys,
             source_mode,
             prefilled_from_snapshot_id,
             created_at,
@@ -249,10 +269,14 @@ def _load_current_snapshot(cur, teacher_id: int, academic_year: str, raw_table_i
         "header_signature": row[8],
         "column_hints": row[9] or [],
         "table_fingerprint": row[10],
-        "source_mode": row[11],
-        "prefilled_from_snapshot_id": row[12],
-        "created_at": row[13],
-        "updated_at": row[14],
+        "stable_section_key": row[11],
+        "stable_structure_key": row[12],
+        "stable_table_key": row[13],
+        "stable_column_keys": row[14] or [],
+        "source_mode": row[15],
+        "prefilled_from_snapshot_id": row[16],
+        "created_at": row[17],
+        "updated_at": row[18],
     }
 
 
@@ -278,6 +302,10 @@ def _create_snapshot(
     header_signature: str,
     column_hints,
     table_fingerprint: str,
+    stable_section_key: str,
+    stable_structure_key: str,
+    stable_table_key: str,
+    stable_column_keys,
     source_mode: str,
     prefilled_from_snapshot_id: int | None,
 ):
@@ -293,12 +321,16 @@ def _create_snapshot(
             header_signature,
             column_hints,
             table_fingerprint,
+            stable_section_key,
+            stable_structure_key,
+            stable_table_key,
+            stable_column_keys,
             source_mode,
             prefilled_from_snapshot_id,
             created_at,
             updated_at
         )
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now(),now())
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now(),now())
         RETURNING id;
     """, (
         teacher_id,
@@ -311,6 +343,10 @@ def _create_snapshot(
         header_signature,
         Json(column_hints or []),
         table_fingerprint,
+        stable_section_key,
+        stable_structure_key,
+        stable_table_key,
+        Json(stable_column_keys or []),
         source_mode,
         prefilled_from_snapshot_id,
     ))
@@ -325,6 +361,8 @@ def _load_current_static_values(cur, snapshot_id: int):
             col_index,
             cell_key,
             semantic_key,
+            stable_cell_key,
+            stable_column_key,
             row_signature,
             column_hint_text,
             value_text
@@ -341,9 +379,11 @@ def _load_current_static_values(cur, snapshot_id: int):
             "col_index": r[2],
             "cell_key": r[3],
             "semantic_key": r[4],
-            "row_signature": r[5],
-            "column_hint_text": r[6],
-            "value": r[7] if r[7] is not None else "",
+            "stable_cell_key": r[5],
+            "stable_column_key": r[6],
+            "row_signature": r[7],
+            "column_hint_text": r[8],
+            "value": r[9] if r[9] is not None else "",
         }
         for r in rows
     ]
@@ -364,7 +404,7 @@ def _load_current_loop_rows(cur, snapshot_id: int):
         row_order = lr[1]
 
         cur.execute("""
-            SELECT col_index, value_text, column_hint_text, semantic_key
+            SELECT col_index, value_text, column_hint_text, semantic_key, stable_column_key
             FROM teacher_manual_loop_cell_values
             WHERE loop_row_id=%s
             ORDER BY col_index, id;
@@ -380,6 +420,7 @@ def _load_current_loop_rows(cur, snapshot_id: int):
                     "value": v[1] if v[1] is not None else "",
                     "column_hint_text": v[2],
                     "semantic_key": v[3],
+                    "stable_column_key": v[4],
                 }
                 for v in vals
             ]
@@ -438,6 +479,10 @@ def get_manual_fill_form(
                     t.loop_template_row_index,
                     t.column_hints,
                     t.table_fingerprint,
+                    t.stable_section_key,
+                    t.stable_structure_key,
+                    t.stable_table_key,
+                    t.stable_column_keys,
                     t.structure_meta,
                     t.extra_meta
                 FROM raw_docx_tables t
@@ -458,8 +503,12 @@ def get_manual_fill_form(
                     "loop_template_row_index": row[8],
                     "column_hints": row[9] or [],
                     "table_fingerprint": row[10],
-                    "structure_meta": row[11] or {},
-                    "extra_meta": row[12] or {},
+                    "stable_section_key": row[11],
+                    "stable_structure_key": row[12],
+                    "stable_table_key": row[13],
+                    "stable_column_keys": row[14] or [],
+                    "structure_meta": row[15] or {},
+                    "extra_meta": row[16] or {},
                 }
                 for row in table_rows
             ]
@@ -492,8 +541,12 @@ def get_manual_fill_form(
                     "loop_template_row_index": t[8],
                     "column_hints": t[9] or [],
                     "table_fingerprint": t[10],
-                    "structure_meta": t[11] or {},
-                    "extra_meta": t[12] or {},
+                    "stable_section_key": t[11],
+                    "stable_structure_key": t[12],
+                    "stable_table_key": t[13],
+                    "stable_column_keys": t[14] or [],
+                    "structure_meta": t[15] or {},
+                    "extra_meta": t[16] or {},
                 }
                 is_excel_bound = int(raw_table_id) in excel_bound_raw_table_ids
 
@@ -581,6 +634,7 @@ def get_manual_fill_form(
                                         "value": cell.get("value", ""),
                                         "column_hint_text": cell.get("column_hint_text"),
                                         "semantic_key": None,
+                                        "stable_column_key": cell.get("stable_column_key"),
                                         "from_previous_year": True,
                                     }
                                     for cell in (row.get("cells") or [])
@@ -604,6 +658,10 @@ def get_manual_fill_form(
                     "loop_template_row_index": table_meta["loop_template_row_index"],
                     "column_hints": table_meta["column_hints"],
                     "table_fingerprint": table_meta["table_fingerprint"],
+                    "stable_section_key": table_meta["stable_section_key"],
+                    "stable_structure_key": table_meta["stable_structure_key"],
+                    "stable_table_key": table_meta["stable_table_key"],
+                    "stable_column_keys": table_meta["stable_column_keys"],
                     "structure_meta": table_meta["structure_meta"],
                     "extra_meta": table_meta["extra_meta"],
                     "matrix": matrix,
@@ -700,6 +758,8 @@ def save_static_values(
                             c.col_index,
                             c.cell_key,
                             c.semantic_key,
+                            c.stable_cell_key,
+                            c.stable_column_key,
                             c.row_signature,
                             c.column_hint_text,
                             c.is_editable,
@@ -708,7 +768,11 @@ def save_static_values(
                             t.section_title,
                             t.header_signature,
                             t.column_hints,
-                            t.table_fingerprint
+                            t.table_fingerprint,
+                            t.stable_section_key,
+                            t.stable_structure_key,
+                            t.stable_table_key,
+                            t.stable_column_keys
                         FROM raw_docx_cells c
                         JOIN raw_docx_tables t ON t.id = c.table_id
                         WHERE c.id=%s;
@@ -724,6 +788,8 @@ def save_static_values(
                         col_index,
                         cell_key,
                         semantic_key,
+                        stable_cell_key,
+                        stable_column_key,
                         row_signature,
                         column_hint_text,
                         is_editable,
@@ -733,6 +799,10 @@ def save_static_values(
                         header_signature,
                         column_hints,
                         table_fingerprint,
+                        stable_section_key,
+                        stable_structure_key,
+                        stable_table_key,
+                        stable_column_keys,
                     ) = row
 
                     if int(template_id) != int(raw_template_id):
@@ -751,6 +821,10 @@ def save_static_values(
                         "header_signature": header_signature,
                         "column_hints": column_hints or [],
                         "table_fingerprint": table_fingerprint,
+                        "stable_section_key": stable_section_key,
+                        "stable_structure_key": stable_structure_key,
+                        "stable_table_key": stable_table_key,
+                        "stable_column_keys": stable_column_keys or [],
                         "cells": [],
                     })
 
@@ -760,6 +834,8 @@ def save_static_values(
                         "col_index": col_index,
                         "cell_key": cell_key,
                         "semantic_key": semantic_key,
+                        "stable_cell_key": stable_cell_key,
+                        "stable_column_key": stable_column_key,
                         "row_signature": row_signature,
                         "column_hint_text": column_hint_text,
                         "value": value_text,
@@ -804,6 +880,10 @@ def save_static_values(
                         header_signature=table_data["header_signature"],
                         column_hints=table_data["column_hints"],
                         table_fingerprint=table_data["table_fingerprint"],
+                        stable_section_key=table_data["stable_section_key"],
+                        stable_structure_key=table_data["stable_structure_key"],
+                        stable_table_key=table_data["stable_table_key"],
+                        stable_column_keys=table_data["stable_column_keys"],
                         source_mode=source_mode,
                         prefilled_from_snapshot_id=prefilled_from_snapshot_id,
                     )
@@ -817,13 +897,15 @@ def save_static_values(
                                 col_index,
                                 cell_key,
                                 semantic_key,
+                                stable_cell_key,
+                                stable_column_key,
                                 row_signature,
                                 column_hint_text,
                                 value_text,
                                 created_at,
                                 updated_at
                             )
-                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,now(),now());
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now(),now());
                         """, (
                             snapshot_id,
                             cell["raw_cell_id"],
@@ -831,6 +913,8 @@ def save_static_values(
                             cell["col_index"],
                             cell["cell_key"],
                             cell["semantic_key"],
+                            cell["stable_cell_key"],
+                            cell["stable_column_key"],
                             cell["row_signature"],
                             cell["column_hint_text"],
                             cell["value"],
@@ -897,6 +981,10 @@ def add_loop_row(
                         header_signature=raw_table["header_signature"],
                         column_hints=raw_table["column_hints"],
                         table_fingerprint=raw_table["table_fingerprint"],
+                        stable_section_key=raw_table["stable_section_key"],
+                        stable_structure_key=raw_table["stable_structure_key"],
+                        stable_table_key=raw_table["stable_table_key"],
+                        stable_column_keys=raw_table["stable_column_keys"],
                         source_mode="manual",
                         prefilled_from_snapshot_id=None,
                     )
@@ -962,7 +1050,8 @@ def save_loop_row(
                         s.teacher_id,
                         s.id,
                         s.source_mode,
-                        s.prefilled_from_snapshot_id
+                        s.prefilled_from_snapshot_id,
+                        s.stable_column_keys
                     FROM teacher_manual_loop_rows lr
                     JOIN teacher_manual_table_snapshots s ON s.id = lr.snapshot_id
                     WHERE lr.id=%s;
@@ -971,7 +1060,8 @@ def save_loop_row(
                 if not row:
                     raise HTTPException(status_code=404, detail="Loop строка не найдена")
 
-                _, snapshot_teacher_id, snapshot_id, source_mode, prefilled_from_snapshot_id = row
+                _, snapshot_teacher_id, snapshot_id, source_mode, prefilled_from_snapshot_id, stable_column_keys = row
+                stable_column_keys = stable_column_keys or []
 
                 if int(snapshot_teacher_id) != int(teacher_id):
                     raise HTTPException(status_code=403, detail="Нельзя сохранять чужую loop строку")
@@ -983,9 +1073,12 @@ def save_loop_row(
                     value_text = item.get("value", "")
                     column_hint_text = item.get("column_hint_text")
                     semantic_key = item.get("semantic_key")
+                    stable_column_key = item.get("stable_column_key")
 
                     if col_index is None:
                         continue
+                    if not stable_column_key and int(col_index) < len(stable_column_keys):
+                        stable_column_key = stable_column_keys[int(col_index)]
 
                     cur.execute("""
                         INSERT INTO teacher_manual_loop_cell_values(
@@ -993,15 +1086,17 @@ def save_loop_row(
                             col_index,
                             column_hint_text,
                             semantic_key,
+                            stable_column_key,
                             value_text,
                             created_at,
                             updated_at
                         )
-                        VALUES (%s,%s,%s,%s,%s,now(),now())
+                        VALUES (%s,%s,%s,%s,%s,%s,now(),now())
                         ON CONFLICT (loop_row_id, col_index)
                         DO UPDATE SET
                             column_hint_text = EXCLUDED.column_hint_text,
                             semantic_key = EXCLUDED.semantic_key,
+                            stable_column_key = EXCLUDED.stable_column_key,
                             value_text = EXCLUDED.value_text,
                             updated_at = now();
                     """, (
@@ -1009,6 +1104,7 @@ def save_loop_row(
                         int(col_index),
                         column_hint_text,
                         semantic_key,
+                        stable_column_key,
                         value_text,
                     ))
                     saved_count += 1
