@@ -41,6 +41,7 @@ export default function Form63Page() {
   const [excelInfo, setExcelInfo] = useState(null);
   const [form63Templates, setForm63Templates] = useState([]);
   const [selectedTplId, setSelectedTplId] = useState(null);
+  const [iupStatus, setIupStatus] = useState(null);
 
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -89,6 +90,19 @@ export default function Form63Page() {
         (t) => String(t.academic_year) === String(academicYear),
       );
       setSelectedTplId(currentTpl ? currentTpl.id : tpls[0]?.id ?? null);
+
+      try {
+        const iupRes = await api.get(
+          `/form63/iup-status?excel_template_id=${currentExcel.id}`,
+        );
+        if (iupRes.data?.status === "ok") {
+          setIupStatus(iupRes.data);
+        } else {
+          setIupStatus(null);
+        }
+      } catch {
+        setIupStatus(null);
+      }
     } catch (e) {
       setError(e?.response?.data?.detail || e.message || "Ошибка загрузки данных");
     } finally {
@@ -192,6 +206,40 @@ export default function Form63Page() {
         {loading && <div style={styles.status}>Загрузка данных...</div>}
         {info && <div style={styles.statusOk}>{info}</div>}
         {error && <div style={styles.error}>{error}</div>}
+
+        {iupStatus && (
+          <div style={styles.iupStatusBox}>
+            <div style={styles.iupStatusTop}>
+              <strong>Статус заполнения ИУП</strong>
+              <span style={styles.iupCounter}>
+                {iupStatus.teachers_with_iup} из {iupStatus.total_teachers}
+              </span>
+            </div>
+            <p style={styles.iupHint}>
+              Категории K–R берутся из сводной таблицы ИУП учителя. Для тех, у
+              кого ИУП ещё не заполнен, K–L заполнятся из Excel-нагрузки, а
+              M–R останутся пустыми.
+            </p>
+            {iupStatus.teachers && iupStatus.teachers.length > 0 && (
+              <div style={styles.iupList}>
+                {iupStatus.teachers.map((t) => (
+                  <div key={t.teacher_name} style={styles.iupRow}>
+                    <span
+                      style={{
+                        ...styles.iupBadge,
+                        background: t.iup_filled ? "#dcfce7" : "#fef3c7",
+                        color: t.iup_filled ? "#166534" : "#92400e",
+                      }}
+                    >
+                      {t.iup_filled ? "ИУП" : "Excel"}
+                    </span>
+                    <span>{t.teacher_name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <h2 style={styles.h2}>Загрузить шаблон Формы 63</h2>
         <div style={styles.uploadBox}>
@@ -432,5 +480,54 @@ const styles = {
     background: "#ecfdf5",
     color: "#047857",
     border: "1px solid #a7f3d0",
+  },
+  iupStatusBox: {
+    marginTop: "16px",
+    padding: "14px 16px",
+    border: "1px solid #c7d2fe",
+    background: "#eef2ff",
+    borderRadius: "12px",
+  },
+  iupStatusTop: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    color: "#1e293b",
+  },
+  iupCounter: {
+    background: "#1e293b",
+    color: "#fff",
+    padding: "2px 10px",
+    borderRadius: "999px",
+    fontSize: "13px",
+    fontWeight: 700,
+  },
+  iupHint: {
+    margin: "6px 0 10px",
+    color: "#475569",
+    fontSize: "13px",
+  },
+  iupList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+    maxHeight: "180px",
+    overflowY: "auto",
+  },
+  iupRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    padding: "4px 8px",
+    background: "#fff",
+    borderRadius: "8px",
+    fontSize: "13px",
+  },
+  iupBadge: {
+    padding: "1px 8px",
+    borderRadius: "8px",
+    fontSize: "11px",
+    fontWeight: 700,
+    textTransform: "uppercase",
   },
 };
