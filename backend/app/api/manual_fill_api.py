@@ -87,7 +87,7 @@ def _check_template_access(user: dict, raw_template_id: int):
         with conn.cursor() as cur:
             tpl = _get_raw_template(cur, raw_template_id)
 
-        if user.get("role") == "admin":
+        if user.get("role") in ("admin", "teacher"):
             if int(user.get("department_id") or 0) != int(tpl["department_id"]):
                 raise HTTPException(status_code=403, detail="Нельзя работать с шаблоном другой кафедры")
         return tpl

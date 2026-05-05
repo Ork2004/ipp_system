@@ -133,6 +133,61 @@ def _normalize_teacher_name(name: str | None) -> str:
     return " ".join(str(name).split()).strip().lower()
 
 
+def _check_department_access(user: dict, department_id: int):
+    token_dep = user.get("department_id")
+    if user.get("role") not in ("admin", "teacher"):
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    if not token_dep or int(token_dep) != int(department_id):
+        raise HTTPException(status_code=403, detail="Нельзя смотреть другую кафедру")
+
+
+def _load_teacher_name(teacher_id: int) -> str:
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT full_name FROM teachers WHERE id=%s;", (teacher_id,))
+            row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Преподаватель не найден")
+        return row[0] or ""
+    finally:
+        conn.close()
+
+
+def _load_excel_template_meta(excel_template_id: int) -> dict:
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            meta = _lookup_excel_template_meta(cur, excel_template_id)
+        if not meta:
+            raise HTTPException(status_code=404, detail="Excel для формы не найден")
+        return meta
+    finally:
+        conn.close()
+
+
+def _check_excel_access(excel_template_id: int, user: dict) -> dict:
+    meta = _load_excel_template_meta(excel_template_id)
+    _check_department_access(user, int(meta["department_id"]))
+    return meta
+
+
+def _filter_items_for_user(items: list[dict], user: dict) -> list[dict]:
+    if user.get("role") != "teacher":
+        return items
+
+    teacher_id = user.get("teacher_id")
+    if not teacher_id:
+        raise HTTPException(status_code=403, detail="teacher_id не привязан к аккаунту")
+
+    teacher_name = _normalize_teacher_name(_load_teacher_name(int(teacher_id)))
+    return [
+        item
+        for item in items
+        if _normalize_teacher_name(item.get("teacher_name")) == teacher_name
+    ]
+
+
 def _build_form63_preview_rows(excel_template_id: int) -> list[dict]:
     """
     Aggregate per-teacher per-semester hours for Form 63.
@@ -314,15 +369,19 @@ def _load_form63_template(form63_template_id: int) -> dict:
 # ---------- preview ----------
 
 @router.get("/preview")
-def form63_preview(excel_template_id: int):
+def form63_preview(excel_template_id: int, user=Depends(require_roles("admin", "teacher"))):
     try:
+        _check_excel_access(excel_template_id, user)
         items = _build_form63_preview_rows(excel_template_id)
+        items = _filter_items_for_user(items, user)
         return {
             "status": "ok",
             "excel_template_id": excel_template_id,
             "count": len(items),
             "items": items,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         return {
             "status": "error",
@@ -331,7 +390,7 @@ def form63_preview(excel_template_id: int):
 
 
 @router.get("/iup-status")
-def form63_iup_status(excel_template_id: int):
+def form63_iup_status(excel_template_id: int, user=Depends(require_roles("admin"))):
     """
     Per-teacher IUP fill status for the given Excel teaching-load template.
 
@@ -340,6 +399,7 @@ def form63_iup_status(excel_template_id: int):
     without a filled IUP will get K..R values from the Excel fallback only.
     """
     try:
+        _check_excel_access(excel_template_id, user)
         items = _build_form63_preview_rows(excel_template_id)
         teachers: dict[str, bool] = {}
         for item in items:
@@ -361,6 +421,8 @@ def form63_iup_status(excel_template_id: int):
             "teachers_without_iup": len(teacher_list) - filled_count,
             "teachers": teacher_list,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         return {"status": "error", "detail": str(e)}
 
@@ -467,10 +529,8 @@ def upload_form63_template(
 
 
 @router.get("/templates")
-def list_form63_templates(department_id: int, user=Depends(require_roles("admin"))):
-    admin_dep = user.get("department_id")
-    if not admin_dep or int(department_id) != int(admin_dep):
-        raise HTTPException(status_code=403, detail="Нельзя смотреть другую кафедру")
+def list_form63_templates(department_id: int, user=Depends(require_roles("admin", "teacher"))):
+    _check_department_access(user, department_id)
 
     conn = get_connection()
     try:
@@ -599,15 +659,22 @@ def update_form63_template_mapping(
 # ---------- export ----------
 
 @router.get("/export-simple")
-def form63_export_simple(excel_template_id: int):
+def form63_export_simple(excel_template_id: int, user=Depends(require_roles("admin", "teacher"))):
     try:
+        _check_excel_access(excel_template_id, user)
         items = _build_form63_preview_rows(excel_template_id)
+        items = _filter_items_for_user(items, user)
         form63_rows = build_form63_rows_from_preview(items)
 
         output_dir = Path("backend/generated/form63")
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        output_path = output_dir / f"form63_simple_template_{excel_template_id}.xlsx"
+        suffix = (
+            f"teacher_{user.get('teacher_id')}"
+            if user.get("role") == "teacher"
+            else "all"
+        )
+        output_path = output_dir / f"form63_simple_{suffix}_{excel_template_id}.xlsx"
         export_form63_simple_xlsx(form63_rows, str(output_path))
 
         return FileResponse(
@@ -615,6 +682,8 @@ def form63_export_simple(excel_template_id: int):
             filename=output_path.name,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+    except HTTPException:
+        raise
     except Exception as e:
         return {
             "status": "error",
@@ -626,17 +695,30 @@ def form63_export_simple(excel_template_id: int):
 def form63_export_template(
     excel_template_id: int,
     form63_template_id: int,
+    user=Depends(require_roles("admin", "teacher")),
 ):
     try:
+        excel_meta = _check_excel_access(excel_template_id, user)
         tpl = _load_form63_template(form63_template_id)
+        _check_department_access(user, int(tpl["department_id"]))
+        if int(tpl["department_id"]) != int(excel_meta["department_id"]):
+            raise HTTPException(status_code=403, detail="Excel и шаблон из разных кафедр")
+        if str(tpl["academic_year"]) != str(excel_meta["academic_year"]):
+            raise HTTPException(status_code=400, detail="Excel и шаблон из разных учебных годов")
+
         items = _build_form63_preview_rows(excel_template_id)
+        items = _filter_items_for_user(items, user)
         form63_rows = build_form63_rows_from_preview(items)
 
         output_dir = Path("backend/generated/form63")
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = (
-            output_dir
-            / f"form63_excel_{excel_template_id}_tpl_{form63_template_id}.xlsx"
+        suffix = (
+            f"teacher_{user.get('teacher_id')}"
+            if user.get("role") == "teacher"
+            else "all"
+        )
+        output_path = output_dir / (
+            f"form63_{suffix}_excel_{excel_template_id}_tpl_{form63_template_id}.xlsx"
         )
 
         export_form63_from_template(

@@ -100,6 +100,10 @@ def generate_for_teacher(payload: dict, user=Depends(get_current_user)):
         _check_admin_teacher_in_department(user, teacher_id)
         if user.get("department_id") and int(department_id) != int(user.get("department_id")):
             raise HTTPException(status_code=403, detail="department_id должен совпадать с кафедрой админа")
+    elif user.get("role") == "teacher":
+        teacher_dep = user.get("department_id")
+        if not teacher_dep or int(department_id) != int(teacher_dep):
+            raise HTTPException(status_code=403, detail="department_id должен совпадать с кафедрой преподавателя")
 
     excel_template_id_hist, raw_template_id_hist = _get_excel_and_raw_ids_for_history(
         department_id,

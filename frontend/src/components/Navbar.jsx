@@ -5,6 +5,30 @@ export default function Navbar() {
 
   const token = localStorage.getItem("token");
   const role = localStorage.getItem("role") || "guest";
+  const roleLabel =
+    role === "admin" ? "Админ" : role === "teacher" ? "Преподаватель" : "Гость";
+
+  const links =
+    role === "admin"
+      ? [
+          { to: "/home", label: "Главная" },
+          { to: "/excel-upload", label: "Нагрузка" },
+          { to: "/workload-data", label: "Данные" },
+          { to: "/raw-template-upload", label: "Шаблон" },
+          { to: "/settings", label: "Настройки" },
+          { to: "/manual-tables", label: "Таблицы" },
+          { to: "/form63", label: "Форма 64" },
+          { to: "/generate", label: "Генерация" },
+        ]
+      : role === "teacher"
+      ? [
+          { to: "/home", label: "Главная" },
+          { to: "/workload-data", label: "Моя нагрузка" },
+          { to: "/manual-tables", label: "Таблицы" },
+          { to: "/form63", label: "Форма 64" },
+          { to: "/generate", label: "Генерация" },
+        ]
+      : [{ to: "/home", label: "Главная" }];
 
   function logout() {
     localStorage.removeItem("token");
@@ -23,12 +47,12 @@ export default function Navbar() {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    height: 46,
-    padding: "0 18px",
-    borderRadius: 14,
+    height: 42,
+    padding: "0 14px",
+    borderRadius: 8,
     fontSize: 14,
-    fontWeight: 800,
-    letterSpacing: "0.01em",
+    fontWeight: 750,
+    letterSpacing: 0,
     color: "#ffffff",
     background: isActive ? "rgba(255,255,255,0.20)" : "transparent",
     border: isActive
@@ -55,7 +79,7 @@ export default function Navbar() {
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 10,
+            gap: 8,
             flexWrap: "wrap",
           }}
         >
@@ -65,37 +89,11 @@ export default function Navbar() {
             </NavLink>
           ) : (
             <>
-              {role === "admin" ? (
-                <>
-                  <NavLink to="/excel-upload" style={navItemStyle}>
-                    Нагрузка
-                  </NavLink>
-
-                  <NavLink to="/workload-data" style={navItemStyle}>
-                    Данные
-                  </NavLink>
-                
-                  <NavLink to="/raw-template-upload" style={navItemStyle}>
-                    Шаблон
-                  </NavLink>
-
-                  <NavLink to="/settings" style={navItemStyle}>
-                    Настройка
-                  </NavLink>
-
-                  <NavLink to="/manual-tables" style={navItemStyle}>
-                    Таблицы
-                  </NavLink>
-
-                  <NavLink to="/form63" style={navItemStyle}>
-                    Форма 63
-                  </NavLink>
-                </>
-              ) : null}
-
-              <NavLink to="/generate" style={navItemStyle}>
-                Генерация
-              </NavLink>
+              {links.map((link) => (
+                <NavLink key={link.to} to={link.to} style={navItemStyle}>
+                  {link.label}
+                </NavLink>
+              ))}
             </>
           )}
         </div>
@@ -117,16 +115,15 @@ export default function Navbar() {
                   alignItems: "center",
                   justifyContent: "center",
                   gap: 8,
-                  height: 46,
-                  padding: "0 18px",
-                  borderRadius: 14,
+                  height: 42,
+                  padding: "0 14px",
+                  borderRadius: 8,
                   background: "rgba(255,255,255,0.14)",
                   border: "1px solid rgba(255,255,255,0.22)",
                   color: "#ffffff",
                   fontSize: 14,
-                  fontWeight: 800,
-                  letterSpacing: "0.04em",
-                  textTransform: "uppercase",
+                  fontWeight: 750,
+                  letterSpacing: 0,
                   whiteSpace: "nowrap",
                 }}
               >
@@ -140,22 +137,22 @@ export default function Navbar() {
                     flexShrink: 0,
                   }}
                 />
-                {role}
+                {roleLabel}
               </div>
 
               <button
                 className="btn btn-outline"
                 onClick={logout}
                 style={{
-                  height: 46,
-                  padding: "0 18px",
-                  borderRadius: 14,
+                  height: 42,
+                  padding: "0 14px",
+                  borderRadius: 8,
                   border: "1px solid rgba(255,255,255,0.22)",
                   background: "rgba(255,255,255,0.14)",
                   color: "#ffffff",
                   fontSize: 14,
-                  fontWeight: 800,
-                  letterSpacing: "0.01em",
+                  fontWeight: 750,
+                  letterSpacing: 0,
                   cursor: "pointer",
                   whiteSpace: "nowrap",
                 }}

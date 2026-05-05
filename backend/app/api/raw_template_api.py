@@ -12,6 +12,14 @@ from backend.app.utils.raw_template_store import store_raw_docx_template
 router = APIRouter(prefix="/raw-template", tags=["Raw Template"])
 
 
+def _check_department_access(user: dict, department_id: int):
+    token_dep = user.get("department_id")
+    if user.get("role") not in ("admin", "teacher"):
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    if not token_dep or int(token_dep) != int(department_id):
+        raise HTTPException(status_code=403, detail="Нельзя смотреть другую кафедру")
+
+
 def _get_raw_template_by_year(cur, department_id: int, academic_year: str):
     cur.execute(
         """
@@ -82,11 +90,9 @@ def upload_raw_template(
 @router.get("/templates")
 def list_raw_templates(
     department_id: int,
-    user=Depends(require_roles("admin")),
+    user=Depends(require_roles("admin", "teacher")),
 ):
-    admin_dep = user.get("department_id")
-    if not admin_dep or int(department_id) != int(admin_dep):
-        raise HTTPException(status_code=403, detail="Нельзя смотреть другую кафедру")
+    _check_department_access(user, department_id)
 
     conn = get_connection()
     try:
@@ -122,11 +128,9 @@ def list_raw_templates(
 def get_raw_template_by_year(
     department_id: int,
     academic_year: str,
-    user=Depends(require_roles("admin")),
+    user=Depends(require_roles("admin", "teacher")),
 ):
-    admin_dep = user.get("department_id")
-    if not admin_dep or int(department_id) != int(admin_dep):
-        raise HTTPException(status_code=403, detail="Нельзя смотреть другую кафедру")
+    _check_department_access(user, department_id)
 
     conn = get_connection()
     try:

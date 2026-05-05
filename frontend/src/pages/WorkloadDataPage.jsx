@@ -25,10 +25,7 @@ const topLabelStyle = {
 };
 
 export default function WorkloadDataPage() {
-  const [departmentId, setDepartmentId] = useState(
-    Number(localStorage.getItem("department_id") || 0)
-  );
-
+  const role = localStorage.getItem("role") || "guest";
   const [templates, setTemplates] = useState([]);
   const [selectedYear, setSelectedYear] = useState(
     localStorage.getItem("academic_year") || "2025-2026"
@@ -132,7 +129,6 @@ export default function WorkloadDataPage() {
     const dep = Number(localStorage.getItem("department_id") || 0);
     const year = localStorage.getItem("academic_year") || "2025-2026";
 
-    setDepartmentId(dep);
     setSelectedYear(year);
 
     (async () => {
@@ -172,7 +168,7 @@ export default function WorkloadDataPage() {
           color: "#17356f",
         }}
       >
-        Данные нагрузки
+        {role === "teacher" ? "Моя нагрузка" : "Данные нагрузки"}
       </div>
 
       <div

@@ -1,29 +1,81 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 
 const yearFieldStyle = {
   width: 220,
-  height: 52,
-  borderRadius: 14,
+  height: 48,
+  borderRadius: 10,
   border: "1px solid #d9e3f5",
   background: "#f8fbff",
   boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
   color: "#17356f",
   fontSize: 16,
   fontWeight: 700,
-  padding: "0 16px",
+  padding: "0 14px",
   outline: "none",
-  opacity: 1,
   WebkitTextFillColor: "#17356f",
   caretColor: "#17356f",
 };
 
-const topLabelStyle = {
-  fontSize: 14,
-  fontWeight: 700,
-  color: "#5f7195",
-  marginBottom: 8,
+const selectStyle = {
+  width: "100%",
+  height: 48,
+  borderRadius: 10,
+  border: "1px solid #d9e3f5",
+  background: "#f8fbff",
+  padding: "0 12px",
+  fontSize: 15,
+  color: "#1f2f4d",
+  WebkitTextFillColor: "#1f2f4d",
+  caretColor: "#1f2f4d",
+  outline: "none",
+  boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
 };
+
+const textInputStyle = {
+  ...selectStyle,
+  padding: "0 14px",
+};
+
+const REQUIRED_COLUMN_KEYS = ["teacher_col", "staff_hours_col"];
+
+const BASIC_COLUMNS = [
+  ["teacher_col", "ФИО"],
+  ["staff_hours_col", "Штатные часы"],
+  ["hourly_hours_col", "Почасовые часы"],
+  ["discipline_col", "Дисциплина"],
+  ["activity_type_col", "Вид занятий"],
+  ["group_col", "Группа"],
+  ["op_col", "ОП"],
+];
+
+const HOURS_COLUMNS = [
+  ["course_col", "Курс"],
+  ["academic_period_col", "Период"],
+  ["credits_col", "Кредиты"],
+  ["student_count_col", "Контингент"],
+  ["payment_form_col", "Оплата"],
+  ["normative_col", "Норматив"],
+  ["lecture_hours_col", "Лекции"],
+  ["practice_hours_col", "Практика/семинар"],
+  ["lab_hours_col", "Лабораторные"],
+  ["srsp_hours_col", "СРСП"],
+  ["rk_hours_col", "РК"],
+  ["exam_hours_col", "Экзамен"],
+  ["practice_load_col", "Практика"],
+  ["diploma_load_col", "ДП/МД"],
+  ["research_load_col", "НИР"],
+  ["other_load_col", "ДВР"],
+  ["total_col", "Итого"],
+];
+
+const STEPS = [
+  { id: "basic", title: "Колонки", hint: "ФИО и часы" },
+  { id: "hours", title: "Часы", hint: "Нагрузка" },
+  { id: "rules", title: "Правила", hint: "Поиск строк" },
+  { id: "tables", title: "Таблицы", hint: "Источник данных" },
+];
 
 function createDefaultConfig() {
   return {
@@ -143,14 +195,13 @@ export default function SettingsPage() {
   const [academicYear, setAcademicYear] = useState(
     localStorage.getItem("academic_year") || "2025-2026"
   );
+  const [activeStep, setActiveStep] = useState("basic");
 
   const [excelTemplates, setExcelTemplates] = useState([]);
   const [excelTemplateId, setExcelTemplateId] = useState("");
-
   const [cols, setCols] = useState([]);
   const [tables, setTables] = useState([]);
   const [status, setStatus] = useState("");
-
   const [cfg, setCfg] = useState(() => createDefaultConfig());
 
   const excelForYear = useMemo(() => {
@@ -160,6 +211,9 @@ export default function SettingsPage() {
       ) || null
     );
   }, [excelTemplates, academicYear]);
+
+  const missingRequired = REQUIRED_COLUMN_KEYS.filter((key) => !cfg.columns[key]);
+  const requiredReady = REQUIRED_COLUMN_KEYS.length - missingRequired.length;
 
   async function loadExcelTemplates() {
     try {
@@ -220,6 +274,12 @@ export default function SettingsPage() {
 
   async function saveSettings() {
     try {
+      if (missingRequired.length) {
+        setStatus("Заполните обязательные колонки");
+        setActiveStep("basic");
+        return;
+      }
+
       setStatus("Сохранение...");
       await api.post("/settings/save", {
         department_id: departmentId,
@@ -227,8 +287,8 @@ export default function SettingsPage() {
         config: cfg,
       });
       setStatus("Сохранено");
-    } catch {
-      setStatus("Ошибка сохранения");
+    } catch (e) {
+      setStatus(e?.response?.data?.detail || "Ошибка сохранения");
     }
   }
 
@@ -243,46 +303,31 @@ export default function SettingsPage() {
   }
 
   function setActivityPatterns(typeKey, text) {
-    const arr = text
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-
     setCfg((prev) => ({
       ...prev,
       activity_types: {
         ...prev.activity_types,
-        [typeKey]: arr,
+        [typeKey]: splitList(text),
       },
     }));
   }
 
   function setSpecialPatterns(bucketKey, text) {
-    const arr = text
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-
     setCfg((prev) => ({
       ...prev,
       special_workload_patterns: {
         ...prev.special_workload_patterns,
-        [bucketKey]: arr,
+        [bucketKey]: splitList(text),
       },
     }));
   }
 
   function setMergeRuleArray(key, text) {
-    const arr = text
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-
     setCfg((prev) => ({
       ...prev,
       merge_rules: {
         ...prev.merge_rules,
-        [key]: arr,
+        [key]: splitList(text),
       },
     }));
   }
@@ -337,508 +382,398 @@ export default function SettingsPage() {
 
     const id = excelForYear.id;
     setExcelTemplateId(String(id));
-
     loadColumns(id);
     loadRawTables();
     loadSettings();
   }, [excelTemplates, academicYear]);
 
   return (
-    <div
-      className="container"
-      style={{
-        maxWidth: 1280,
-        paddingTop: 28,
-        paddingBottom: 40,
-      }}
-    >
+    <main className="container" style={{ maxWidth: 1180, paddingTop: 32 }}>
       <div
-        className="page-title"
         style={{
-          fontSize: 52,
-          fontWeight: 800,
-          lineHeight: 1.05,
-          letterSpacing: "-0.03em",
-          marginBottom: 24,
-          color: "#17356f",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-end",
+          gap: 16,
+          flexWrap: "wrap",
+          marginBottom: 20,
         }}
       >
-        Настройки
+        <div>
+          <div
+            style={{
+              fontSize: 44,
+              lineHeight: 1.05,
+              fontWeight: 800,
+              color: "#17356f",
+            }}
+          >
+            Настройки
+          </div>
+          <div style={{ marginTop: 8, color: "#6f83a8", fontWeight: 700 }}>
+            {requiredReady}/{REQUIRED_COLUMN_KEYS.length} обязательных
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <input
+            className="input"
+            style={yearFieldStyle}
+            value={academicYear}
+            onChange={(e) => handleYearChange(e.target.value)}
+            placeholder="2025-2026"
+          />
+          <button
+            className="btn btn-primary"
+            onClick={saveSettings}
+            disabled={!excelForYear}
+            style={{
+              minWidth: 140,
+              height: 46,
+              borderRadius: 10,
+              fontWeight: 800,
+              boxShadow: "0 12px 24px rgba(58,110,255,0.18)",
+            }}
+          >
+            Сохранить
+          </button>
+        </div>
       </div>
 
       <div
-        className="card card-pad"
         style={{
-          borderRadius: 28,
-          padding: 24,
-          background: "rgba(255,255,255,0.94)",
-          border: "1px solid rgba(30,58,138,0.08)",
-          boxShadow: "0 16px 50px rgba(15, 23, 42, 0.08)",
+          display: "grid",
+          gridTemplateColumns: "260px minmax(0, 1fr)",
+          gap: 18,
         }}
       >
-        <div
+        <aside
           style={{
-            display: "flex",
-            gap: 14,
-            flexWrap: "wrap",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginBottom: 22,
+            background: "#fff",
+            border: "1px solid #e4ebf7",
+            borderRadius: 14,
+            padding: 12,
+            alignSelf: "start",
+            boxShadow: "0 10px 26px rgba(15, 23, 42, 0.05)",
+          }}
+        >
+          <Meta label="Кафедра" value={departmentId || "—"} />
+          <Meta label="Excel" value={excelTemplateId || "—"} />
+          <Meta label="Колонок" value={cols.length || "—"} />
+          <div className="hr" />
+          <div style={{ display: "grid", gap: 8 }}>
+            {STEPS.map((step) => (
+              <StepButton
+                key={step.id}
+                step={step}
+                active={activeStep === step.id}
+                onClick={() => setActiveStep(step.id)}
+              />
+            ))}
+          </div>
+        </aside>
+
+        <section
+          style={{
+            background: "rgba(255,255,255,0.96)",
+            border: "1px solid rgba(30,58,138,0.08)",
+            borderRadius: 16,
+            padding: 22,
+            minHeight: 520,
+            boxShadow: "0 14px 36px rgba(15, 23, 42, 0.07)",
           }}
         >
           <div
             style={{
               display: "flex",
-              gap: 14,
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 12,
+              marginBottom: 18,
               flexWrap: "wrap",
-              alignItems: "flex-end",
             }}
           >
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              <div style={topLabelStyle}>Учебный год</div>
-              <input
-                className="input"
-                style={yearFieldStyle}
-                value={academicYear}
-                onChange={(e) => handleYearChange(e.target.value)}
-                placeholder="2025-2026"
-              />
-            </div>
-
-            <div
-              className="small"
-              style={{
-                color: status ? "#315fcb" : "#7c8aa5",
-                fontWeight: 600,
-                minHeight: 20,
-                paddingBottom: 10,
-              }}
-            >
+            <div style={{ color: "#315fcb", fontWeight: 750, minHeight: 22 }}>
               {status}
             </div>
+            {!excelForYear ? (
+              <div style={badgeStyle("#b45309", "rgba(180,83,9,0.10)")}>
+                Excel не найден
+              </div>
+            ) : missingRequired.length ? (
+              <div style={badgeStyle("#b45309", "rgba(180,83,9,0.10)")}>
+                Нужны ФИО и штатные часы
+              </div>
+            ) : (
+              <div style={badgeStyle("#1f8f57", "rgba(31,143,87,0.10)")}>
+                Готово
+              </div>
+            )}
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              gap: 10,
-              flexWrap: "wrap",
-              alignItems: "center",
-            }}
-          >
-            <div
-              style={{
-                padding: "10px 14px",
-                borderRadius: 12,
-                background: "#f7faff",
-                border: "1px solid #dfe8f7",
-                color: "#5f7195",
-                fontSize: 13,
-                fontWeight: 700,
-              }}
-            >
-              Кафедра ID: {departmentId || "—"}
-            </div>
+          {!excelForYear ? (
+            <EmptyState />
+          ) : activeStep === "basic" ? (
+            <ColumnStep
+              title="Колонки Excel"
+              fields={BASIC_COLUMNS}
+              cols={cols}
+              cfg={cfg}
+              onChange={setCol}
+              requiredKeys={REQUIRED_COLUMN_KEYS}
+            />
+          ) : activeStep === "hours" ? (
+            <ColumnStep
+              title="Часы и нагрузка"
+              fields={HOURS_COLUMNS}
+              cols={cols}
+              cfg={cfg}
+              onChange={setCol}
+              requiredKeys={[]}
+            />
+          ) : activeStep === "rules" ? (
+            <RulesStep
+              cfg={cfg}
+              setActivityPatterns={setActivityPatterns}
+              setSpecialPatterns={setSpecialPatterns}
+              setMergeRuleArray={setMergeRuleArray}
+            />
+          ) : (
+            <TablesStep
+              tables={tables}
+              cfg={cfg}
+              setTeachingLoadTable={setTeachingLoadTable}
+              setTeachingLoadSource={setTeachingLoadSource}
+            />
+          )}
+        </section>
+      </div>
+    </main>
+  );
+}
 
-            <div
-              style={{
-                padding: "10px 14px",
-                borderRadius: 12,
-                background: "#f7faff",
-                border: "1px solid #dfe8f7",
-                color: "#5f7195",
-                fontSize: 13,
-                fontWeight: 700,
-              }}
-            >
-              Excel шаблон: {excelTemplateId || "—"}
-            </div>
+function splitList(text) {
+  return String(text || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
-            <button
-              className="btn btn-primary"
-              onClick={saveSettings}
-              style={{
-                minWidth: 150,
-                height: 46,
-                borderRadius: 14,
-                fontWeight: 700,
-                boxShadow: "0 12px 24px rgba(58,110,255,0.18)",
-              }}
-            >
-              Сохранить
-            </button>
-          </div>
-        </div>
+function EmptyState() {
+  return (
+    <div
+      style={{
+        border: "1px dashed #cbd5e1",
+        borderRadius: 14,
+        padding: 22,
+        color: "#6f83a8",
+        fontWeight: 700,
+      }}
+    >
+      Загрузите Excel для выбранного года.
+    </div>
+  );
+}
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
-            gap: 20,
-          }}
-        >
-          <SectionCard title="Маппинг колонок">
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: 16,
-              }}
-            >
-              <SelectRow
-                label="ФИО"
-                value={cfg.columns.teacher_col}
-                cols={cols}
-                onChange={(v) => setCol("teacher_col", v)}
-              />
-
-              <SelectRow
-                label="Штатные часы"
-                value={cfg.columns.staff_hours_col}
-                cols={cols}
-                onChange={(v) => setCol("staff_hours_col", v)}
-              />
-
-              <SelectRow
-                label="Почасовые часы"
-                value={cfg.columns.hourly_hours_col}
-                cols={cols}
-                onChange={(v) => setCol("hourly_hours_col", v)}
-              />
-
-              <SelectRow
-                label="Дисциплина"
-                value={cfg.columns.discipline_col}
-                cols={cols}
-                onChange={(v) => setCol("discipline_col", v)}
-              />
-
-              <SelectRow
-                label="Вид занятий"
-                value={cfg.columns.activity_type_col}
-                cols={cols}
-                onChange={(v) => setCol("activity_type_col", v)}
-              />
-
-              <SelectRow
-                label="Группа"
-                value={cfg.columns.group_col}
-                cols={cols}
-                onChange={(v) => setCol("group_col", v)}
-              />
-
-              <SelectRow
-                label="ОП"
-                value={cfg.columns.op_col}
-                cols={cols}
-                onChange={(v) => setCol("op_col", v)}
-              />
-
-              <SelectRow
-                label="Курс"
-                value={cfg.columns.course_col}
-                cols={cols}
-                onChange={(v) => setCol("course_col", v)}
-              />
-
-              <SelectRow
-                label="Акад. период"
-                value={cfg.columns.academic_period_col}
-                cols={cols}
-                onChange={(v) => setCol("academic_period_col", v)}
-              />
-
-              <SelectRow
-                label="Кредиты"
-                value={cfg.columns.credits_col}
-                cols={cols}
-                onChange={(v) => setCol("credits_col", v)}
-              />
-
-              <SelectRow
-                label="Контингент"
-                value={cfg.columns.student_count_col}
-                cols={cols}
-                onChange={(v) => setCol("student_count_col", v)}
-              />
-
-              <SelectRow
-                label="Форма оплаты"
-                value={cfg.columns.payment_form_col}
-                cols={cols}
-                onChange={(v) => setCol("payment_form_col", v)}
-              />
-
-              <SelectRow
-                label="Норматив"
-                value={cfg.columns.normative_col}
-                cols={cols}
-                onChange={(v) => setCol("normative_col", v)}
-              />
-
-              <SelectRow
-                label="Лекции (часы)"
-                value={cfg.columns.lecture_hours_col}
-                cols={cols}
-                onChange={(v) => setCol("lecture_hours_col", v)}
-              />
-
-              <SelectRow
-                label="Практ./семин. (часы)"
-                value={cfg.columns.practice_hours_col}
-                cols={cols}
-                onChange={(v) => setCol("practice_hours_col", v)}
-              />
-
-              <SelectRow
-                label="Лабораторные (часы)"
-                value={cfg.columns.lab_hours_col}
-                cols={cols}
-                onChange={(v) => setCol("lab_hours_col", v)}
-              />
-
-              <SelectRow
-                label="СРСП (часы)"
-                value={cfg.columns.srsp_hours_col}
-                cols={cols}
-                onChange={(v) => setCol("srsp_hours_col", v)}
-              />
-
-              <SelectRow
-                label="РК 1,2"
-                value={cfg.columns.rk_hours_col}
-                cols={cols}
-                onChange={(v) => setCol("rk_hours_col", v)}
-              />
-
-              <SelectRow
-                label="Экзамен"
-                value={cfg.columns.exam_hours_col}
-                cols={cols}
-                onChange={(v) => setCol("exam_hours_col", v)}
-              />
-
-              <SelectRow
-                label="Практика"
-                value={cfg.columns.practice_load_col}
-                cols={cols}
-                onChange={(v) => setCol("practice_load_col", v)}
-              />
-
-              <SelectRow
-                label="Рук-во ДП/МД"
-                value={cfg.columns.diploma_load_col}
-                cols={cols}
-                onChange={(v) => setCol("diploma_load_col", v)}
-              />
-
-              <SelectRow
-                label="НИРМ/НИРД"
-                value={cfg.columns.research_load_col}
-                cols={cols}
-                onChange={(v) => setCol("research_load_col", v)}
-              />
-
-              <SelectRow
-                label="ДВР"
-                value={cfg.columns.other_load_col}
-                cols={cols}
-                onChange={(v) => setCol("other_load_col", v)}
-              />
-
-              <SelectRow
-                label="Итого"
-                value={cfg.columns.total_col}
-                cols={cols}
-                onChange={(v) => setCol("total_col", v)}
-              />
-            </div>
-          </SectionCard>
-
-          <SectionCard title="Типы занятий">
-            <div
-              style={{
-                display: "grid",
-                gap: 16,
-              }}
-            >
-              <TextRow
-                label="Лекции"
-                value={cfg.activity_types.lecture.join(", ")}
-                onChange={(v) => setActivityPatterns("lecture", v)}
-              />
-
-              <TextRow
-                label="Лабораторные / практика"
-                value={cfg.activity_types.lab_practice.join(", ")}
-                onChange={(v) => setActivityPatterns("lab_practice", v)}
-              />
-            </div>
-          </SectionCard>
-
-          <SectionCard title="Спецнагрузка">
-            <div
-              style={{
-                display: "grid",
-                gap: 16,
-              }}
-            >
-              <TextRow
-                label="Практика"
-                value={cfg.special_workload_patterns.practika.join(", ")}
-                onChange={(v) => setSpecialPatterns("practika", v)}
-              />
-
-              <TextRow
-                label="Рук-во ДП/МД"
-                value={cfg.special_workload_patterns.diploma_supervision.join(
-                  ", "
-                )}
-                onChange={(v) =>
-                  setSpecialPatterns("diploma_supervision", v)
-                }
-              />
-
-              <TextRow
-                label="НИРМ/НИРД"
-                value={cfg.special_workload_patterns.research_work.join(", ")}
-                onChange={(v) => setSpecialPatterns("research_work", v)}
-              />
-
-              <TextRow
-                label="ДВР"
-                value={cfg.special_workload_patterns.other_work.join(", ")}
-                onChange={(v) => setSpecialPatterns("other_work", v)}
-              />
-            </div>
-          </SectionCard>
-
-          <SectionCard title="Правила объединения">
-            <div
-              style={{
-                display: "grid",
-                gap: 16,
-              }}
-            >
-              <TextRow
-                label="Ключевые колонки"
-                value={cfg.merge_rules.key_cols.join(", ")}
-                onChange={(v) => setMergeRuleArray("key_cols", v)}
-              />
-            </div>
-          </SectionCard>
-
-          <SectionCard title="Привязка таблиц">
-            <div
-              style={{
-                display: "grid",
-                gap: 16,
-              }}
-            >
-              <TeachingLoadBinding
-                label="Штатка"
-                tables={tables}
-                binding={cfg.template_bindings.teaching_load.staff}
-                onTableChange={(v) => setTeachingLoadTable("staff", v)}
-                onSourceChange={(v) => setTeachingLoadSource("staff", v)}
-              />
-
-              <TeachingLoadBinding
-                label="Почасовая"
-                tables={tables}
-                binding={cfg.template_bindings.teaching_load.hourly}
-                onTableChange={(v) => setTeachingLoadTable("hourly", v)}
-                onSourceChange={(v) => setTeachingLoadSource("hourly", v)}
-              />
-              <TeachingLoadBinding
-                label="Сводная"
-                tables={tables}
-                binding={cfg.template_bindings.teaching_load.summary}
-                onTableChange={(v) => setTeachingLoadTable("summary", v)}
-                onSourceChange={(v) => setTeachingLoadSource("summary", v)}
-              />
-            </div>
-          </SectionCard>
-        </div>
+function Meta({ label, value }) {
+  return (
+    <div style={{ padding: "8px 6px" }}>
+      <div style={{ color: "#7c8aa5", fontSize: 12, fontWeight: 800 }}>
+        {label}
+      </div>
+      <div style={{ color: "#17356f", fontWeight: 800, marginTop: 3 }}>
+        {value}
       </div>
     </div>
   );
 }
 
-function SectionCard({ title, subtitle, children }) {
+function StepButton({ step, active, onClick }) {
   return (
-    <section
+    <button
+      type="button"
+      onClick={onClick}
       style={{
-        borderRadius: 24,
-        border: "1px solid #e4ebf7",
-        background: "#ffffff",
-        boxShadow: "0 10px 28px rgba(15, 23, 42, 0.04)",
-        padding: 22,
+        width: "100%",
+        textAlign: "left",
+        border: active ? "1px solid rgba(49,95,203,0.24)" : "1px solid transparent",
+        background: active ? "rgba(49,95,203,0.10)" : "transparent",
+        borderRadius: 10,
+        padding: "12px 10px",
+        cursor: "pointer",
       }}
     >
-      <div style={{ marginBottom: 18 }}>
-        <div
-          style={{
-            fontSize: 28,
-            fontWeight: 800,
-            color: "#17356f",
-            lineHeight: 1.1,
-            marginBottom: subtitle ? 8 : 0,
-            letterSpacing: "-0.02em",
-          }}
-        >
-          {title}
-        </div>
-
-        {subtitle ? (
-          <div
-            style={{
-              color: "#7c8aa5",
-              fontSize: 15,
-              lineHeight: 1.5,
-            }}
-          >
-            {subtitle}
-          </div>
-        ) : null}
+      <div style={{ color: "#17356f", fontWeight: 800 }}>{step.title}</div>
+      <div style={{ color: "#7c8aa5", fontSize: 12, fontWeight: 700, marginTop: 2 }}>
+        {step.hint}
       </div>
+    </button>
+  );
+}
 
-      {children}
+function ColumnStep({ title, fields, cols, cfg, onChange, requiredKeys }) {
+  return (
+    <div>
+      <StepTitle title={title} />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 14,
+        }}
+      >
+        {fields.map(([key, label]) => (
+          <SelectRow
+            key={key}
+            label={label}
+            value={cfg.columns[key]}
+            cols={cols}
+            required={requiredKeys.includes(key)}
+            onChange={(v) => onChange(key, v)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RulesStep({
+  cfg,
+  setActivityPatterns,
+  setSpecialPatterns,
+  setMergeRuleArray,
+}) {
+  return (
+    <div>
+      <StepTitle title="Правила" />
+      <div style={{ display: "grid", gap: 20 }}>
+        <FieldGroup title="Типы занятий">
+          <TextRow
+            label="Лекции"
+            value={cfg.activity_types.lecture.join(", ")}
+            onChange={(v) => setActivityPatterns("lecture", v)}
+          />
+          <TextRow
+            label="Лабораторные / практика"
+            value={cfg.activity_types.lab_practice.join(", ")}
+            onChange={(v) => setActivityPatterns("lab_practice", v)}
+          />
+        </FieldGroup>
+
+        <FieldGroup title="Спецнагрузка">
+          <TextRow
+            label="Практика"
+            value={cfg.special_workload_patterns.practika.join(", ")}
+            onChange={(v) => setSpecialPatterns("practika", v)}
+          />
+          <TextRow
+            label="ДП/МД"
+            value={cfg.special_workload_patterns.diploma_supervision.join(", ")}
+            onChange={(v) => setSpecialPatterns("diploma_supervision", v)}
+          />
+          <TextRow
+            label="НИР"
+            value={cfg.special_workload_patterns.research_work.join(", ")}
+            onChange={(v) => setSpecialPatterns("research_work", v)}
+          />
+          <TextRow
+            label="ДВР"
+            value={cfg.special_workload_patterns.other_work.join(", ")}
+            onChange={(v) => setSpecialPatterns("other_work", v)}
+          />
+        </FieldGroup>
+
+        <FieldGroup title="Объединение">
+          <TextRow
+            label="Ключевые колонки"
+            value={cfg.merge_rules.key_cols.join(", ")}
+            onChange={(v) => setMergeRuleArray("key_cols", v)}
+          />
+        </FieldGroup>
+      </div>
+    </div>
+  );
+}
+
+function TablesStep({
+  tables,
+  cfg,
+  setTeachingLoadTable,
+  setTeachingLoadSource,
+}) {
+  return (
+    <div>
+      <StepTitle title="Привязка таблиц" />
+      <div style={{ display: "grid", gap: 16 }}>
+        <TeachingLoadBinding
+          label="Штатка"
+          tables={tables}
+          binding={cfg.template_bindings.teaching_load.staff}
+          onTableChange={(v) => setTeachingLoadTable("staff", v)}
+          onSourceChange={(v) => setTeachingLoadSource("staff", v)}
+        />
+        <TeachingLoadBinding
+          label="Почасовая"
+          tables={tables}
+          binding={cfg.template_bindings.teaching_load.hourly}
+          onTableChange={(v) => setTeachingLoadTable("hourly", v)}
+          onSourceChange={(v) => setTeachingLoadSource("hourly", v)}
+        />
+        <TeachingLoadBinding
+          label="Сводная"
+          tables={tables}
+          binding={cfg.template_bindings.teaching_load.summary}
+          onTableChange={(v) => setTeachingLoadTable("summary", v)}
+          onSourceChange={(v) => setTeachingLoadSource("summary", v)}
+        />
+      </div>
+    </div>
+  );
+}
+
+function StepTitle({ title }) {
+  return (
+    <div
+      style={{
+        color: "#17356f",
+        fontSize: 28,
+        fontWeight: 800,
+        lineHeight: 1.1,
+        marginBottom: 18,
+      }}
+    >
+      {title}
+    </div>
+  );
+}
+
+function FieldGroup({ title, children }) {
+  return (
+    <section>
+      <div style={{ color: "#17356f", fontSize: 18, fontWeight: 800, marginBottom: 12 }}>
+        {title}
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 14,
+        }}
+      >
+        {children}
+      </div>
     </section>
   );
 }
 
-function SelectRow({ label, value, cols, onChange }) {
+function SelectRow({ label, value, cols, required, onChange }) {
   return (
-    <div style={{ display: "grid", gap: 8 }}>
-      <label
-        style={{
-          fontSize: 15,
-          fontWeight: 700,
-          color: "#334155",
-        }}
-      >
+    <label style={{ display: "grid", gap: 7 }}>
+      <span style={{ color: "#334155", fontSize: 14, fontWeight: 800 }}>
         {label}
-      </label>
-
-      <select
-        value={value || ""}
-        onChange={(e) => onChange(e.target.value)}
-        style={{
-          width: "100%",
-          height: 52,
-          borderRadius: 14,
-          border: "1px solid #d9e3f5",
-          background: "#f8fbff",
-          padding: "0 14px",
-          fontSize: 15,
-          color: "#1f2f4d",
-          WebkitTextFillColor: "#1f2f4d",
-          caretColor: "#1f2f4d",
-          outline: "none",
-          boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
-        }}
-      >
+        {required ? <span style={{ color: "#b45309" }}> *</span> : null}
+      </span>
+      <select value={value || ""} onChange={(e) => onChange(e.target.value)} style={selectStyle}>
         <option value="">—</option>
         {(cols || []).map((c) => (
           <option key={c.column_name} value={c.column_name}>
@@ -846,42 +781,22 @@ function SelectRow({ label, value, cols, onChange }) {
           </option>
         ))}
       </select>
-    </div>
+    </label>
   );
 }
 
 function TextRow({ label, value, onChange }) {
   return (
-    <div style={{ display: "grid", gap: 8 }}>
-      <label
-        style={{
-          fontSize: 15,
-          fontWeight: 700,
-          color: "#334155",
-        }}
-      >
+    <label style={{ display: "grid", gap: 7 }}>
+      <span style={{ color: "#334155", fontSize: 14, fontWeight: 800 }}>
         {label}
-      </label>
-
+      </span>
       <input
         value={value || ""}
         onChange={(e) => onChange(e.target.value)}
-        style={{
-          width: "100%",
-          height: 52,
-          borderRadius: 14,
-          border: "1px solid #d9e3f5",
-          background: "#f8fbff",
-          padding: "0 14px",
-          fontSize: 15,
-          color: "#1f2f4d",
-          WebkitTextFillColor: "#1f2f4d",
-          caretColor: "#1f2f4d",
-          outline: "none",
-          boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
-        }}
+        style={textInputStyle}
       />
-    </div>
+    </label>
   );
 }
 
@@ -896,41 +811,21 @@ function TeachingLoadBinding({
   const value = binding?.raw_table_id || "";
 
   return (
-    <div style={{ display: "grid", gap: 8 }}>
-      <label
-        style={{
-          fontSize: 15,
-          fontWeight: 700,
-          color: "#334155",
-        }}
-      >
+    <label style={{ display: "grid", gap: 7 }}>
+      <span style={{ color: "#334155", fontSize: 14, fontWeight: 800 }}>
         {label}
-      </label>
-
+      </span>
       <div
         style={{
           display: "grid",
-          gap: 12,
-          gridTemplateColumns: "180px minmax(0, 1fr)",
+          gridTemplateColumns: "170px minmax(0, 1fr)",
+          gap: 10,
         }}
       >
         <select
           value={source}
           onChange={(e) => onSourceChange(e.target.value)}
-          style={{
-            width: "100%",
-            height: 52,
-            borderRadius: 14,
-            border: "1px solid #d9e3f5",
-            background: "#f8fbff",
-            padding: "0 14px",
-            fontSize: 15,
-            color: "#1f2f4d",
-            WebkitTextFillColor: "#1f2f4d",
-            caretColor: "#1f2f4d",
-            outline: "none",
-            boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
-          }}
+          style={selectStyle}
         >
           <option value="excel">Excel</option>
           <option value="manual">Вручную</option>
@@ -939,20 +834,7 @@ function TeachingLoadBinding({
         <select
           value={value}
           onChange={(e) => onTableChange(e.target.value)}
-          style={{
-            width: "100%",
-            height: 52,
-            borderRadius: 14,
-            border: "1px solid #d9e3f5",
-            background: "#f8fbff",
-            padding: "0 14px",
-            fontSize: 15,
-            color: "#1f2f4d",
-            WebkitTextFillColor: "#1f2f4d",
-            caretColor: "#1f2f4d",
-            outline: "none",
-            boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
-          }}
+          style={selectStyle}
         >
           <option value="">Выберите таблицу</option>
           {(tables || []).map((t) => (
@@ -962,6 +844,18 @@ function TeachingLoadBinding({
           ))}
         </select>
       </div>
-    </div>
+    </label>
   );
+}
+
+function badgeStyle(color, background) {
+  return {
+    color,
+    background,
+    border: `1px solid ${color}22`,
+    borderRadius: 999,
+    padding: "7px 10px",
+    fontSize: 13,
+    fontWeight: 800,
+  };
 }
