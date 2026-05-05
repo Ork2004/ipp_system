@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Navbar from "./components/Navbar";
 
+import HomePage from "./pages/HomePage";
 import LoginPage from "./pages/LoginPage";
 import ExcelUploadPage from "./pages/ExcelUploadPage";
 import WorkloadDataPage from "./pages/WorkloadDataPage";
@@ -21,7 +22,16 @@ function RequireAdmin({ children }) {
   const role = localStorage.getItem("role");
 
   if (!token) return <Navigate to="/login" replace />;
-  if (role !== "admin") return <Navigate to="/generate" replace />;
+  if (role !== "admin") return <Navigate to="/home" replace />;
+  return children;
+}
+
+function RequireRoles({ roles, children }) {
+  const token = localStorage.getItem("token");
+  const role = localStorage.getItem("role") || "guest";
+
+  if (!token) return <Navigate to="/login" replace />;
+  if (!roles.includes(role)) return <Navigate to="/home" replace />;
   return children;
 }
 
@@ -33,14 +43,23 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
 
-        <Route path="/" element={<Navigate to="/generate" replace />} />
+        <Route path="/" element={<Navigate to="/home" replace />} />
+
+        <Route
+          path="/home"
+          element={
+            <RequireAuth>
+              <HomePage />
+            </RequireAuth>
+          }
+        />
 
         <Route
           path="/generate"
           element={
-            <RequireAuth>
+            <RequireRoles roles={["admin", "teacher"]}>
               <GeneratePage />
-            </RequireAuth>
+            </RequireRoles>
           }
         />
 
@@ -56,9 +75,9 @@ export default function App() {
         <Route
           path="/workload-data"
           element={
-            <RequireAdmin>
+            <RequireRoles roles={["admin", "teacher"]}>
               <WorkloadDataPage />
-            </RequireAdmin>
+            </RequireRoles>
           }
         />
 
@@ -83,9 +102,9 @@ export default function App() {
         <Route
           path="/manual-tables"
           element={
-            <RequireAdmin>
+            <RequireRoles roles={["admin", "teacher"]}>
               <ManualTablesPage />
-            </RequireAdmin>
+            </RequireRoles>
           }
         />
 
@@ -93,13 +112,13 @@ export default function App() {
         <Route
           path="/form63"
           element={
-            <RequireAdmin>
+            <RequireRoles roles={["admin", "teacher"]}>
               <Form63Page />
-            </RequireAdmin>
+            </RequireRoles>
           }
         />
 
-        <Route path="*" element={<Navigate to="/generate" replace />} />
+        <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>
     </BrowserRouter>
   );

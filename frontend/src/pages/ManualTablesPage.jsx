@@ -62,7 +62,6 @@ export default function ManualTablesPage() {
   const [formValues, setFormValues] = useState({});
   const [loopValues, setLoopValues] = useState({});
   const [tableLoopRows, setTableLoopRows] = useState({});
-  const [savingLoopRowId, setSavingLoopRowId] = useState("");
   const [savingLoopTableId, setSavingLoopTableId] = useState(0);
   const [deletingLoopRowId, setDeletingLoopRowId] = useState("");
   const [addingLoopTableId, setAddingLoopTableId] = useState(0);

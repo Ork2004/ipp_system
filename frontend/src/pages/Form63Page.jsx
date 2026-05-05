@@ -38,6 +38,9 @@ const CATEGORY_ORDER = [
 ];
 
 export default function Form63Page() {
+  const role = localStorage.getItem("role") || "guest";
+  const isAdmin = role === "admin";
+
   const [excelInfo, setExcelInfo] = useState(null);
   const [form63Templates, setForm63Templates] = useState([]);
   const [selectedTplId, setSelectedTplId] = useState(null);
@@ -91,16 +94,20 @@ export default function Form63Page() {
       );
       setSelectedTplId(currentTpl ? currentTpl.id : tpls[0]?.id ?? null);
 
-      try {
-        const iupRes = await api.get(
-          `/form63/iup-status?excel_template_id=${currentExcel.id}`,
-        );
-        if (iupRes.data?.status === "ok") {
-          setIupStatus(iupRes.data);
-        } else {
+      if (isAdmin) {
+        try {
+          const iupRes = await api.get(
+            `/form63/iup-status?excel_template_id=${currentExcel.id}`,
+          );
+          if (iupRes.data?.status === "ok") {
+            setIupStatus(iupRes.data);
+          } else {
+            setIupStatus(null);
+          }
+        } catch {
           setIupStatus(null);
         }
-      } catch {
+      } else {
         setIupStatus(null);
       }
     } catch (e) {
@@ -111,6 +118,7 @@ export default function Form63Page() {
   }
 
   async function handleUpload() {
+    if (!isAdmin) return;
     if (!uploadFile) return;
     setError("");
     setInfo("");
@@ -138,7 +146,8 @@ export default function Form63Page() {
   }
 
   async function handleDelete(id) {
-    if (!confirm("Удалить шаблон Формы 63?")) return;
+    if (!isAdmin) return;
+    if (!confirm("Удалить шаблон формы 64?")) return;
     setError("");
     try {
       await api.delete(`/form63/templates/${id}`);
@@ -165,13 +174,13 @@ export default function Form63Page() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `form63_${academicYear}.xlsx`;
+      a.download = `form64_${academicYear}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
     } catch (e) {
-      setError(e?.response?.data?.detail || "Ошибка при скачивании Form 63");
+      setError(e?.response?.data?.detail || "Ошибка при скачивании");
     } finally {
       setDownloading(false);
     }
@@ -182,10 +191,11 @@ export default function Form63Page() {
   return (
     <div style={styles.page}>
       <div style={styles.card}>
-        <h1 style={styles.title}>Форма 63</h1>
+        <h1 style={styles.title}>Форма 64</h1>
         <p style={styles.subtitle}>
-          Загрузите актуальный шаблон Формы 63 — система распознает структуру
-          и заполнит её данными по нагрузке.
+          {isAdmin
+            ? "Шаблон и генерация по нагрузке."
+            : "Генерация по вашим данным."}
         </p>
 
         <div style={styles.infoBox}>
@@ -241,26 +251,30 @@ export default function Form63Page() {
           </div>
         )}
 
-        <h2 style={styles.h2}>Загрузить шаблон Формы 63</h2>
-        <div style={styles.uploadBox}>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx"
-            onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-          />
-          <button
-            style={styles.secondaryButton}
-            onClick={handleUpload}
-            disabled={!uploadFile || uploading}
-          >
-            {uploading ? "Загрузка..." : "Загрузить и распознать"}
-          </button>
-        </div>
+        {isAdmin ? (
+          <>
+            <h2 style={styles.h2}>Загрузить шаблон</h2>
+            <div style={styles.uploadBox}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx"
+                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+              />
+              <button
+                style={styles.secondaryButton}
+                onClick={handleUpload}
+                disabled={!uploadFile || uploading}
+              >
+                {uploading ? "Загрузка..." : "Загрузить"}
+              </button>
+            </div>
+          </>
+        ) : null}
 
-        <h2 style={styles.h2}>Загруженные шаблоны</h2>
+        <h2 style={styles.h2}>{isAdmin ? "Загруженные шаблоны" : "Шаблон"}</h2>
         {form63Templates.length === 0 ? (
-          <div style={styles.muted}>Пока нет шаблонов для кафедры.</div>
+          <div style={styles.muted}>Шаблон не найден.</div>
         ) : (
           <div style={styles.tplList}>
             {form63Templates.map((t) => (
@@ -282,21 +296,23 @@ export default function Form63Page() {
                     <b>{Object.keys(t.column_mapping || {}).length}</b>
                   </div>
                 </div>
-                <button
-                  style={styles.deleteButton}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    handleDelete(t.id);
-                  }}
-                >
-                  Удалить
-                </button>
+                {isAdmin ? (
+                  <button
+                    style={styles.deleteButton}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleDelete(t.id);
+                    }}
+                  >
+                    Удалить
+                  </button>
+                ) : null}
               </label>
             ))}
           </div>
         )}
 
-        {selectedTpl && (
+        {isAdmin && selectedTpl && (
           <>
             <h2 style={styles.h2}>Распознанный маппинг колонок</h2>
             <div style={styles.mappingBox}>
@@ -326,7 +342,7 @@ export default function Form63Page() {
             !selectedTplId
           }
         >
-          {downloading ? "Формирование..." : "Сформировать и скачать Form 63"}
+          {downloading ? "Формирование..." : "Сформировать и скачать"}
         </button>
       </div>
     </div>
