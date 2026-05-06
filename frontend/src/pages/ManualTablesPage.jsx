@@ -2,31 +2,86 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 
 const fieldStyle = {
-  width: 220,
-  height: 52,
-  borderRadius: 14,
-  border: "1px solid #d9e3f5",
-  background: "#f8fbff",
-  boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
-  color: "#17356f",
-  fontSize: 16,
-  fontWeight: 700,
-  padding: "0 16px",
+  width: "min(220px, 100%)",
+  height: 42,
+  borderRadius: 8,
+  border: "1px solid #d8dee8",
+  background: "#fff",
+  boxShadow: "none",
+  color: "#1f2a44",
+  fontSize: 14,
+  fontWeight: 600,
+  padding: "0 12px",
   outline: "none",
   opacity: 1,
-  WebkitTextFillColor: "#17356f",
+  WebkitTextFillColor: "#1f2a44",
 };
 
 const teacherFieldStyle = {
   ...fieldStyle,
-  width: 420,
+  width: "min(360px, 100%)",
 };
 
 const labelStyle = {
-  fontSize: 14,
+  fontSize: 13,
   fontWeight: 700,
-  color: "#5f7195",
-  marginBottom: 8,
+  color: "#536278",
+  marginBottom: 6,
+  letterSpacing: 0,
+};
+
+const badgeBaseStyle = {
+  fontSize: 11,
+  fontWeight: 700,
+  borderRadius: 999,
+  padding: "4px 7px",
+  lineHeight: 1,
+};
+
+const excelBadgeStyle = {
+  ...badgeBaseStyle,
+  color: "#536278",
+  background: "#f8fafc",
+  border: "1px solid #e1e7ef",
+};
+
+const manualBadgeStyle = {
+  ...badgeBaseStyle,
+  color: "#315fcb",
+  background: "#f7faff",
+  border: "1px solid #d8e5ff",
+};
+
+const yearBadgeStyle = {
+  ...badgeBaseStyle,
+  color: "#6f7b8f",
+  background: "#fff",
+  border: "1px solid #e1e7ef",
+};
+
+const valueBoxStyle = {
+  minHeight: 36,
+  padding: "8px 10px",
+  border: "1px solid #d9e3f5",
+  borderRadius: 8,
+  background: "#fff",
+  color: "#1f2f4d",
+  fontWeight: 600,
+  overflowWrap: "anywhere",
+  wordBreak: "break-word",
+};
+
+const tableNumberStyle = {
+  width: 34,
+  height: 34,
+  borderRadius: 8,
+  background: "#eef4ff",
+  color: "#2f5cb8",
+  display: "grid",
+  placeItems: "center",
+  fontSize: 13,
+  fontWeight: 800,
+  flex: "0 0 auto",
 };
 
 function makeTempLoopRowId() {
@@ -309,7 +364,7 @@ export default function ManualTablesPage() {
     setOpenTableIds({});
 
     try {
-      setStatus("Поиск шаблона...");
+      setStatus("Загрузка...");
       const id = await resolveRawTemplateIdByYear(nextYear);
 
       if (!id) {
@@ -369,7 +424,7 @@ export default function ManualTablesPage() {
         values,
       });
 
-      setStatus("Сохранено");
+      setStatus("");
       await loadForm(rawTemplateId, teacherId);
     } catch (e) {
       console.error(e);
@@ -414,7 +469,7 @@ export default function ManualTablesPage() {
         [tmpId]: {},
       }));
 
-      setStatus("Строка добавлена");
+      setStatus("");
     } catch (e) {
       console.error(e);
       setStatus("Ошибка добавления строки");
@@ -497,7 +552,7 @@ export default function ManualTablesPage() {
         await _persistAndSaveRow(table, row);
       }
 
-      setStatus("Сохранено");
+      setStatus("");
       await loadForm(rawTemplateId, teacherId);
     } catch (e) {
       console.error(e);
@@ -529,7 +584,7 @@ export default function ManualTablesPage() {
           return next;
         });
 
-        setStatus("Строка удалена");
+        setStatus("");
         return;
       }
 
@@ -539,7 +594,7 @@ export default function ManualTablesPage() {
         },
       });
 
-      setStatus("Строка удалена");
+      setStatus("");
       await loadForm(rawTemplateId, teacherId);
     } catch (e) {
       console.error(e);
@@ -553,20 +608,20 @@ export default function ManualTablesPage() {
     <div
       className="container"
       style={{
-        maxWidth: 1280,
-        paddingTop: 28,
-        paddingBottom: 40,
+        maxWidth: 1120,
+        paddingTop: 24,
+        paddingBottom: 44,
       }}
     >
       <div
         className="page-title"
         style={{
-          fontSize: 52,
+          fontSize: 30,
           fontWeight: 800,
-          lineHeight: 1.05,
-          letterSpacing: "-0.03em",
-          marginBottom: 24,
-          color: "#17356f",
+          lineHeight: 1.15,
+          letterSpacing: 0,
+          marginBottom: 18,
+          color: "#172033",
         }}
       >
         Заполнение разделов
@@ -575,20 +630,25 @@ export default function ManualTablesPage() {
       <div
         className="card card-pad"
         style={{
-          borderRadius: 28,
-          padding: 24,
-          background: "rgba(255,255,255,0.94)",
-          border: "1px solid rgba(30,58,138,0.08)",
-          boxShadow: "0 16px 50px rgba(15, 23, 42, 0.08)",
+          borderRadius: 0,
+          padding: 0,
+          background: "transparent",
+          border: "none",
+          boxShadow: "none",
         }}
       >
         <div
           style={{
             display: "flex",
-            gap: 18,
+            gap: 12,
             flexWrap: "wrap",
             alignItems: "flex-end",
             marginBottom: 20,
+            padding: 14,
+            borderRadius: 10,
+            border: "1px solid #e0e7f1",
+            background: "#fff",
+            boxShadow: "0 1px 3px rgba(15, 23, 42, 0.04)",
           }}
         >
           <div style={{ display: "flex", flexDirection: "column" }}>
@@ -634,26 +694,31 @@ export default function ManualTablesPage() {
             </div>
           ) : null}
 
-          <div
-            className="small"
-            style={{
-              color: status ? "#315fcb" : "#7c8aa5",
-              fontWeight: 600,
-              minHeight: 24,
-              paddingBottom: 10,
-            }}
-          >
-            {loading ? "Загрузка..." : status}
-          </div>
+          {loading || status ? (
+            <div
+              className="small"
+              style={{
+                color: status ? "#315fcb" : "#7c8aa5",
+                fontWeight: 600,
+                minHeight: 32,
+                padding: "0 8px",
+                display: "flex",
+                alignItems: "center",
+              }}
+            >
+              {loading ? "Загрузка..." : status}
+            </div>
+          ) : null}
         </div>
 
         {!tables.length && !loading ? (
           <div
             className="small"
             style={{
-              padding: "16px 0",
+              padding: "22px 0",
               color: "#7c8aa5",
-              fontWeight: 500,
+              fontWeight: 600,
+              textAlign: "center",
             }}
           >
             Нет таблиц для заполнения
@@ -665,113 +730,106 @@ export default function ManualTablesPage() {
             <div
               className="section-title"
               style={{
-                marginTop: 0,
-                marginBottom: 12,
-                fontSize: 25,
+                margin: 0,
+                padding: "0 2px 10px",
+                fontSize: 18,
                 fontWeight: 800,
-                color: "#17356f",
-                letterSpacing: "-0.02em",
+                color: "#172033",
+                letterSpacing: 0,
+                borderBottom: "1px solid #dfe7f2",
               }}
             >
               {section.sectionTitle}
             </div>
 
-            {section.items.map((table) => (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns:
+                  "repeat(auto-fit, minmax(min(100%, 260px), 1fr))",
+                gap: 12,
+                marginTop: 12,
+              }}
+            >
+              {section.items.map((table) => {
+                const isOpen = !!openTableIds[table.id];
+
+                return (
               <div
                 className="card"
                 key={table.id}
                 style={{
-                  marginTop: 14,
-                  borderRadius: 22,
+                  gridColumn: isOpen ? "1 / -1" : "auto",
+                  borderRadius: 14,
                   overflow: "hidden",
-                  border: "1px solid #e4ebf7",
+                  border: isOpen ? "1px solid #cbd8eb" : "1px solid #e2e8f0",
                   background: "#fff",
-                  boxShadow: "0 10px 26px rgba(15, 23, 42, 0.05)",
+                  boxShadow: isOpen
+                    ? "0 12px 30px rgba(15, 23, 42, 0.065)"
+                    : "0 2px 8px rgba(15, 23, 42, 0.035)",
                 }}
               >
                 <div
                   style={{
-                    padding: 18,
+                    padding: 14,
+                    minHeight: 82,
                     display: "flex",
                     gap: 12,
                     alignItems: "center",
                     justifyContent: "space-between",
                     flexWrap: "wrap",
-                    background: "#f7faff",
-                    borderBottom: "1px solid #e4ebf7",
+                    background: isOpen ? "#f8fbff" : "#fff",
+                    borderBottom: isOpen ? "1px solid #e4ebf7" : "none",
                   }}
                 >
-                  <div style={{ display: "grid", gap: 4 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 12,
+                      alignItems: "center",
+                      minWidth: 0,
+                    }}
+                  >
+                    <span style={tableNumberStyle}>
+                      {String(Number(table.table_index) + 1).padStart(2, "0")}
+                    </span>
+
+                    <div style={{ display: "grid", gap: 7, minWidth: 0 }}>
                     <div
                       style={{
                         fontWeight: 800,
-                        fontSize: 18,
-                        color: "#17356f",
+                        fontSize: 15,
+                        color: "#172033",
                         display: "flex",
-                        gap: 10,
+                        gap: 8,
                         alignItems: "center",
                         flexWrap: "wrap",
                       }}
                     >
                       <span>Таблица {Number(table.table_index) + 1}</span>
+                    </div>
 
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 7,
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                      }}
+                    >
                       {table.excel_bound ? (
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 800,
-                            color: "#315fcb",
-                            background: "rgba(49,95,203,0.10)",
-                            border: "1px solid rgba(49,95,203,0.20)",
-                            borderRadius: 999,
-                            padding: "6px 10px",
-                          }}
-                        >
-                          Excel
-                        </span>
+                        <span style={excelBadgeStyle}>Excel</span>
                       ) : (
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 800,
-                            color: "#1f8f57",
-                            background: "rgba(31,143,87,0.10)",
-                            border: "1px solid rgba(31,143,87,0.20)",
-                            borderRadius: 999,
-                            padding: "6px 10px",
-                          }}
-                        >
-                          Manual
-                        </span>
+                        <span style={manualBadgeStyle}>Manual</span>
                       )}
 
                       {table.prefill?.found ? (
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 800,
-                            color: "#1f8f57",
-                            background: "rgba(31,143,87,0.10)",
-                            border: "1px solid rgba(31,143,87,0.20)",
-                            borderRadius: 999,
-                            padding: "6px 10px",
-                          }}
-                        >
-                          Из прошлого года: {table.prefill?.source_academic_year}
+                        <span style={yearBadgeStyle}>
+                          {table.prefill?.source_academic_year}
                         </span>
                       ) : null}
                     </div>
 
-                    <div
-                      className="small"
-                      style={{
-                        color: "#6f83a8",
-                        fontWeight: 500,
-                      }}
-                    >
-                      {table.table_type === "loop"
-                        ? "Таблица со строками"
-                        : "Обычная таблица"}
                     </div>
                   </div>
 
@@ -779,20 +837,29 @@ export default function ManualTablesPage() {
                     className="btn btn-outline"
                     onClick={() => toggleOpen(table.id)}
                     style={{
-                      borderRadius: 12,
-                      minWidth: 110,
-                      height: 42,
+                      borderRadius: 8,
+                      minWidth: 84,
+                      height: 34,
                       fontWeight: 700,
-                      border: "1px solid #d6e2fb",
+                      color: isOpen ? "#1d4ed8" : "#243b7a",
+                      border: isOpen
+                        ? "1px solid #c7d7f5"
+                        : "1px solid #dce5f2",
                       background: "#fff",
+                      boxShadow: "none",
                     }}
                   >
-                    {openTableIds[table.id] ? "Скрыть" : "Открыть"}
+                    {isOpen ? "Скрыть" : "Открыть"}
                   </button>
                 </div>
 
-                {openTableIds[table.id] ? (
-                  <div style={{ padding: 18 }}>
+                {isOpen ? (
+                  <div
+                    style={{
+                      padding: 14,
+                      background: "#f8fbff",
+                    }}
+                  >
                     {table.table_type === "static" ? (
                       <>
                         <StaticTableGrid
@@ -802,58 +869,60 @@ export default function ManualTablesPage() {
                           readOnly={!!table.excel_bound}
                         />
 
-                        {table.excel_bound ? (
-                          <div
-                            className="small"
-                            style={{
-                              marginTop: 14,
-                              color: "#5f7195",
-                              fontWeight: 500,
-                            }}
-                          >
-                            Эта таблица заполняется из Excel нагрузки. Ручное сохранение отключено.
-                          </div>
-                        ) : null}
-
-                        <div className="actions-row" style={{ marginTop: 14 }}>
-                          <button
-                            className="btn btn-primary"
-                            onClick={() => saveStaticTable(table)}
-                            disabled={table.excel_bound || savingStaticTableId === table.id}
-                            style={{
-                              minWidth: 150,
-                              height: 46,
-                              borderRadius: 14,
-                              fontWeight: 700,
-                              boxShadow: "0 12px 24px rgba(58,110,255,0.18)",
-                            }}
-                          >
-                            {savingStaticTableId === table.id
-                              ? "Сохранение..."
-                              : "Сохранить"}
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <LoopTableEditor
-                        table={table}
-                        rows={tableLoopRows[table.id] || []}
-                        getLoopRowValue={getLoopRowValue}
-                        setLoopRowValue={setLoopRowValue}
-                        onAddRow={() => addLoopRow(table)}
-                        onSaveTable={() => saveAllLoopRows(table)}
-                        onDeleteRow={(row) => deleteLoopRow(row, table.id)}
-                        addingLoopTableId={addingLoopTableId}
-                        savingLoopTableId={savingLoopTableId}
-                        savingThisTable={savingLoopTableId === table.id}
-                        deletingLoopRowId={deletingLoopRowId}
-                        readOnly={!!table.excel_bound}
-                      />
-                    )}
+                              {!table.excel_bound ? (
+                                <div
+                                  className="actions-row"
+                                  style={{
+                                    marginTop: 14,
+                                    justifyContent: "flex-end",
+                                  }}
+                                >
+                                  <button
+                                    className="btn btn-primary"
+                                    onClick={() => saveStaticTable(table)}
+                                    disabled={savingStaticTableId === table.id}
+                                    style={{
+                                      minWidth: 120,
+                                      height: 38,
+                                      borderRadius: 8,
+                                      fontWeight: 700,
+                                      boxShadow: "none",
+                                    }}
+                                  >
+                                    {savingStaticTableId === table.id
+                                      ? "Сохранение..."
+                                      : "Сохранить"}
+                                  </button>
+                                </div>
+                              ) : null}
+                            </>
+                          ) : table.excel_bound ? (
+                            <LoopTablePreview
+                              table={table}
+                              rows={tableLoopRows[table.id] || []}
+                              getLoopRowValue={getLoopRowValue}
+                            />
+                          ) : (
+                            <LoopTableEditor
+                              table={table}
+                              rows={tableLoopRows[table.id] || []}
+                              getLoopRowValue={getLoopRowValue}
+                              setLoopRowValue={setLoopRowValue}
+                              onAddRow={() => addLoopRow(table)}
+                              onSaveTable={() => saveAllLoopRows(table)}
+                              onDeleteRow={(row) => deleteLoopRow(row, table.id)}
+                              addingLoopTableId={addingLoopTableId}
+                              savingLoopTableId={savingLoopTableId}
+                              savingThisTable={savingLoopTableId === table.id}
+                              deletingLoopRowId={deletingLoopRowId}
+                            />
+                      )}
                   </div>
                 ) : null}
               </div>
-            ))}
+                );
+              })}
+            </div>
           </div>
         ))}
       </div>
@@ -928,16 +997,18 @@ function StaticTableGrid({ table, formValues, onChange, readOnly = false }) {
   return (
     <div
       style={{
-        overflowX: "auto",
-        borderRadius: 18,
-        border: "1px solid #e4ebf7",
+        overflow: "visible",
+        borderRadius: 8,
+        border: "1px solid #e0e7f1",
         background: "#fff",
+        boxShadow: "none",
       }}
     >
       <table
         className="table"
         style={{
-          minWidth: Math.max(760, (table.col_count || 1) * 140),
+          width: "100%",
+          minWidth: 0,
           tableLayout: "fixed",
           borderCollapse: "separate",
           borderSpacing: 0,
@@ -972,11 +1043,17 @@ function StaticTableGrid({ table, formValues, onChange, readOnly = false }) {
                         colSpan={item.span}
                         style={{
                           verticalAlign: "top",
-                          background: cell.editable ? "#f8fbff" : "#fff",
-                          borderTop: "1px solid #edf2fb",
-                          borderRight: "1px solid #edf2fb",
-                          minWidth: 140,
-                          padding: 12,
+                          background: cell.editable
+                            ? "#fff"
+                            : rowIndex === 0
+                              ? "#f8fafc"
+                              : "#fff",
+                          borderTop: "1px solid #edf1f6",
+                          borderRight: "1px solid #edf1f6",
+                          minWidth: 0,
+                          padding: 9,
+                          overflowWrap: "anywhere",
+                          wordBreak: "break-word",
                         }}
                       >
                         {cell.editable ? (
@@ -994,33 +1071,47 @@ function StaticTableGrid({ table, formValues, onChange, readOnly = false }) {
                               </div>
                             ) : null}
 
-                            <input
-                              className="input"
-                              value={formValues[cell.raw_cell_id] ?? ""}
-                              onChange={(e) =>
-                                onChange(cell.raw_cell_id, e.target.value)
-                              }
-                              disabled={readOnly}
-                              placeholder="Введите значение"
-                              style={{
-                                background: readOnly ? "#eef4ff" : "#fff",
-                                border: "1px solid #d9e3f5",
-                                borderRadius: 12,
-                                minHeight: 42,
-                                color: "#1f2f4d",
-                                WebkitTextFillColor: "#1f2f4d",
-                                caretColor: "#1f2f4d",
-                              }}
-                            />
+                            {readOnly ? (
+                              <div
+                                style={{
+                                  ...valueBoxStyle,
+                                  background: "#fff",
+                                }}
+                              >
+                                {formValues[cell.raw_cell_id] || "—"}
+                              </div>
+                            ) : (
+                              <input
+                                className="input"
+                                value={formValues[cell.raw_cell_id] ?? ""}
+                                onChange={(e) =>
+                                  onChange(cell.raw_cell_id, e.target.value)
+                                }
+                                placeholder="Введите значение"
+                                style={{
+                                  background: "#fff",
+                                  border: "1px solid #d9e3f5",
+                                  borderRadius: 8,
+                                  minHeight: 36,
+                                  padding: "8px 10px",
+                                  color: "#1f2f4d",
+                                  WebkitTextFillColor: "#1f2f4d",
+                                  caretColor: "#1f2f4d",
+                                  minWidth: 0,
+                                }}
+                              />
+                            )}
                           </div>
                         ) : (
                           <div
                             style={{
                               whiteSpace: "pre-wrap",
-                              fontSize: 14,
-                              lineHeight: 1.45,
+                              fontSize: 13,
+                              lineHeight: 1.35,
                               color: "#1f2f4d",
                               fontWeight: rowIndex === 0 ? 700 : 500,
+                              overflowWrap: "anywhere",
+                              wordBreak: "break-word",
                             }}
                           >
                             {cell.text || ""}
@@ -1039,6 +1130,89 @@ function StaticTableGrid({ table, formValues, onChange, readOnly = false }) {
   );
 }
 
+function LoopTablePreview({ table, rows, getLoopRowValue }) {
+  const colCount = Math.max(0, Number(table.col_count || 0));
+
+  if (!rows?.length || !colCount) {
+    return (
+      <div
+        className="small"
+        style={{
+          padding: 16,
+          border: "1px solid #e0e7f1",
+          borderRadius: 8,
+          background: "#fff",
+          color: "#7c8aa5",
+          fontWeight: 600,
+          textAlign: "center",
+        }}
+      >
+        Нет данных
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      {rows.map((row, rowIndex) => {
+        const rowId = row.persisted_loop_row_id || row.loop_row_id;
+
+        return (
+          <div
+            key={String(rowId ?? row.row_order ?? rowIndex)}
+            style={{
+              borderRadius: 8,
+              border: "1px solid #e0e7f1",
+              background: "#fff",
+              padding: 12,
+              boxShadow: "none",
+            }}
+          >
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns:
+                  "repeat(auto-fit, minmax(min(100%, 170px), 1fr))",
+                gap: 9,
+              }}
+            >
+              {Array.from({ length: colCount }).map((_, colIndex) => {
+                const hint =
+                  table.column_hints?.[colIndex] || `Колонка ${colIndex + 1}`;
+                const value = getLoopRowValue(rowId, colIndex);
+
+                return (
+                  <div key={`${rowId ?? rowIndex}-${colIndex}`}>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 800,
+                        marginBottom: 5,
+                        color: "#5d6d85",
+                        overflowWrap: "anywhere",
+                      }}
+                    >
+                      {hint}
+                    </div>
+
+                    <div
+                      style={{
+                        ...valueBoxStyle,
+                      }}
+                    >
+                      {value || "—"}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function LoopTableEditor({
   table,
   rows,
@@ -1050,89 +1224,51 @@ function LoopTableEditor({
   addingLoopTableId,
   savingThisTable,
   deletingLoopRowId,
-  readOnly = false,
 }) {
   return (
     <div>
       <div
+        className="actions-row"
         style={{
-          marginBottom: 14,
-          padding: 16,
-          borderRadius: 18,
-          border: "1px solid #dce8ff",
-          background:
-            "linear-gradient(180deg, rgba(58,110,255,0.07) 0%, rgba(58,110,255,0.03) 100%)",
+          marginTop: 0,
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+          justifyContent: "flex-start",
         }}
       >
-        <div
-          style={{
-            fontWeight: 800,
-            marginBottom: 6,
-            color: "#17356f",
-            fontSize: 17,
-          }}
-        >
-          Добавляемые строки
-        </div>
-        <div
-          className="small"
-          style={{
-            color: "#5f7195",
-            fontWeight: 500,
-          }}
-        >
-          Здесь можно добавлять, проверять и редактировать строки этого раздела.
-        </div>
-      </div>
-
-      <div className="actions-row" style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
         <button
-          className="btn btn-primary"
+          className="btn btn-outline"
           onClick={onAddRow}
-          disabled={readOnly || addingLoopTableId === table.id}
+          disabled={addingLoopTableId === table.id}
           style={{
-            minWidth: 170,
-            height: 46,
-            borderRadius: 14,
+            minWidth: 120,
+            height: 38,
+            borderRadius: 8,
             fontWeight: 700,
-            boxShadow: "0 12px 24px rgba(58,110,255,0.18)",
+            boxShadow: "none",
           }}
         >
-          {addingLoopTableId === table.id ? "Добавление..." : "Добавить строку"}
+          {addingLoopTableId === table.id ? "Добавление..." : "+ Строка"}
         </button>
 
-        {!readOnly && (
-          <button
-            className="btn btn-primary"
-            onClick={onSaveTable}
-            disabled={savingThisTable || !rows?.length}
-            style={{
-              minWidth: 170,
-              height: 46,
-              borderRadius: 14,
-              fontWeight: 700,
-              boxShadow: "0 12px 24px rgba(58,110,255,0.18)",
-              background: savingThisTable ? undefined : "#1a7f52",
-              borderColor: savingThisTable ? undefined : "#1a7f52",
-            }}
-          >
-            {savingThisTable ? "Сохранение..." : "Сохранить таблицу"}
-          </button>
-        )}
-      </div>
-
-      {readOnly ? (
-        <div
-          className="small"
+        <button
+          className="btn btn-primary"
+          onClick={onSaveTable}
+          disabled={savingThisTable || !rows?.length}
           style={{
-            marginTop: 14,
-            color: "#5f7195",
-            fontWeight: 500,
+            minWidth: 170,
+            height: 38,
+            borderRadius: 8,
+            fontWeight: 700,
+            boxShadow: "none",
+            background: savingThisTable ? undefined : "#1a7f52",
+            borderColor: savingThisTable ? undefined : "#1a7f52",
           }}
         >
-          Эта таблица заполняется из Excel нагрузки. Ручное редактирование отключено.
-        </div>
-      ) : null}
+          {savingThisTable ? "Сохранение..." : "Сохранить таблицу"}
+        </button>
+      </div>
 
       {!rows?.length ? (
         <div
@@ -1146,17 +1282,17 @@ function LoopTableEditor({
           Пока нет добавленных строк
         </div>
       ) : (
-        <div style={{ marginTop: 16, display: "grid", gap: 14 }}>
+        <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
           {rows.map((row) => (
             <div
               key={String(row.loop_row_id)}
               className="card"
               style={{
-                borderRadius: 18,
-                border: "1px solid #e4ebf7",
+                borderRadius: 8,
+                border: "1px solid #e0e7f1",
                 background: "#fff",
-                padding: 16,
-                boxShadow: "0 8px 18px rgba(15, 23, 42, 0.04)",
+                padding: 12,
+                boxShadow: "none",
               }}
             >
               <div
@@ -1166,14 +1302,14 @@ function LoopTableEditor({
                   gap: 10,
                   alignItems: "center",
                   flexWrap: "wrap",
-                  marginBottom: 14,
+                  marginBottom: 10,
                 }}
               >
                 <div
                   style={{
                     fontWeight: 800,
-                    color: "#17356f",
-                    fontSize: 17,
+                    color: "#172033",
+                    fontSize: 15,
                     display: "flex",
                     gap: 10,
                     alignItems: "center",
@@ -1185,13 +1321,8 @@ function LoopTableEditor({
                   {row.isPrefilled ? (
                     <span
                       style={{
+                        ...yearBadgeStyle,
                         fontSize: 11,
-                        fontWeight: 800,
-                        color: "#1f8f57",
-                        background: "rgba(31,143,87,0.10)",
-                        border: "1px solid rgba(31,143,87,0.20)",
-                        borderRadius: 999,
-                        padding: "5px 10px",
                       }}
                     >
                       Перенесено из прошлого года
@@ -1201,15 +1332,18 @@ function LoopTableEditor({
 
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <button
-                    className="btn btn-danger"
+                    className="btn btn-outline"
                     onClick={() => onDeleteRow(row)}
-                    disabled={readOnly || deletingLoopRowId === String(row.loop_row_id)}
+                    disabled={deletingLoopRowId === String(row.loop_row_id)}
                     style={{
                       minWidth: 120,
-                      height: 42,
-                      borderRadius: 12,
+                      height: 34,
+                      borderRadius: 8,
                       fontWeight: 700,
                       boxShadow: "none",
+                      color: "#b42318",
+                      border: "1px solid #f3c4be",
+                      background: "#fff",
                     }}
                   >
                     {deletingLoopRowId === String(row.loop_row_id)
@@ -1222,11 +1356,9 @@ function LoopTableEditor({
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: `repeat(${Math.max(
-                    1,
-                    Number(table.col_count || 1)
-                  )}, minmax(160px, 1fr))`,
-                  gap: 12,
+                  gridTemplateColumns:
+                    "repeat(auto-fit, minmax(min(100%, 170px), 1fr))",
+                  gap: 9,
                 }}
               >
                 {Array.from({ length: Number(table.col_count || 0) }).map(
@@ -1241,8 +1373,9 @@ function LoopTableEditor({
                           style={{
                             fontSize: 12,
                             fontWeight: 800,
-                            marginBottom: 6,
-                            color: "#5f7195",
+                            marginBottom: 5,
+                            color: "#5d6d85",
+                            overflowWrap: "anywhere",
                           }}
                         >
                           {hint}
@@ -1261,16 +1394,17 @@ function LoopTableEditor({
                               e.target.value
                             )
                           }
-                          disabled={readOnly}
                           placeholder="Введите значение"
                           style={{
-                            background: readOnly ? "#eef4ff" : "#f8fbff",
+                            background: "#fff",
                             border: "1px solid #d9e3f5",
-                            borderRadius: 12,
-                            minHeight: 42,
+                            borderRadius: 8,
+                            minHeight: 36,
+                            padding: "8px 10px",
                             color: "#1f2f4d",
                             WebkitTextFillColor: "#1f2f4d",
                             caretColor: "#1f2f4d",
+                            minWidth: 0,
                           }}
                         />
                       </div>
