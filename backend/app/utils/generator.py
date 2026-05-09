@@ -13,6 +13,7 @@ from backend.app.utils.teaching_load import (
     build_effective_generation_settings,
     build_teaching_load_context,
     build_teaching_load_summary,
+    get_performance_summary_binding,
     get_teaching_load_binding,
     get_teaching_load_summary_binding,
     is_excel_source_binding,
@@ -718,6 +719,22 @@ def _resolve_teaching_load_summary_raw_table(
     return summary_tables[0]
 
 
+def _resolve_performance_summary_table_index(
+    raw_tables: Dict[int, Dict[str, Any]],
+    settings_cfg: Dict[str, Any],
+) -> Optional[int]:
+    binding = get_performance_summary_binding(settings_cfg)
+    raw_table_id = binding.get("raw_table_id")
+    if not raw_table_id:
+        return None
+
+    raw_table = raw_tables.get(int(raw_table_id))
+    if not raw_table:
+        return None
+
+    return int(raw_table["table_index"])
+
+
 def _find_summary_row_index(table, *patterns: str) -> Optional[int]:
     lowered_patterns = tuple(pattern.lower() for pattern in patterns if pattern)
     for row_index, row in enumerate(table.rows):
@@ -1078,7 +1095,14 @@ def generate_docx_for_teacher(
         )
 
         final_doc = Document(output_path)
-        render_final_performance_summary(final_doc, context)
+        render_final_performance_summary(
+            final_doc,
+            context,
+            target_table_index=_resolve_performance_summary_table_index(
+                deps["raw_tables"],
+                deps["settings_cfg"],
+            ),
+        )
         _render_overall_total_hours_paragraph(final_doc)
         final_doc.save(output_path)
 

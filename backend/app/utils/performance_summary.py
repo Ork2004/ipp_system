@@ -259,7 +259,16 @@ def _iter_doc_tables_with_context(doc: Document) -> List[Dict[str, Any]]:
     return out
 
 
-def _find_performance_overview_item(table_items: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _find_performance_overview_item(
+    table_items: List[Dict[str, Any]],
+    target_table_index: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    if target_table_index is not None:
+        for item in table_items:
+            if int(item["table_index"]) == int(target_table_index):
+                return item
+        return None
+
     matches = [item for item in table_items if _is_performance_overview_table(item["table"])]
     return matches[-1] if matches else None
 
@@ -1017,9 +1026,13 @@ def _recalculate_overview_total_row(table, total_row_index: int, plan_columns: D
         _set_cell_text(_safe_get_cell(table, total_row_index, int(col_index)), _display_value(_round_hours(total)))
 
 
-def render_final_performance_summary(doc: Document, context: Dict[str, Any]) -> None:
+def render_final_performance_summary(
+    doc: Document,
+    context: Dict[str, Any],
+    target_table_index: Optional[int] = None,
+) -> None:
     table_items = _iter_doc_tables_with_context(doc)
-    overview_item = _find_performance_overview_item(table_items)
+    overview_item = _find_performance_overview_item(table_items, target_table_index)
     if not overview_item:
         return
 
