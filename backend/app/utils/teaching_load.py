@@ -231,6 +231,14 @@ def get_teaching_load_summary_binding(settings_cfg: Dict[str, Any]) -> Dict[str,
     return _binding_payload(template_bindings.get("teaching_load_summary"))
 
 
+def get_performance_summary_binding(settings_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    template_bindings = (settings_cfg or {}).get("template_bindings") or {}
+    binding = _binding_payload(template_bindings.get("performance_summary"))
+    if binding:
+        return binding
+    return _binding_payload(template_bindings.get("individual_plan_performance"))
+
+
 def extract_excel_bound_raw_table_ids(settings_cfg: Dict[str, Any]) -> set[int]:
     return extract_excel_bound_raw_table_ids_with_raw_tables(settings_cfg, raw_tables=None)
 
@@ -299,6 +307,47 @@ def infer_teaching_load_bindings(raw_tables: Any) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def is_performance_summary_raw_table(raw_table: Dict[str, Any]) -> bool:
+    hints = " ".join(_normalize_text(value) for value in (raw_table.get("column_hints") or []))
+    structure_meta = raw_table.get("structure_meta") or {}
+    text = _normalize_text_lower(
+        " ".join(
+            [
+                raw_table.get("section_title") or "",
+                raw_table.get("header_signature") or "",
+                hints,
+                structure_meta.get("section_title_norm") or "",
+                structure_meta.get("header_signature_norm") or "",
+            ]
+        )
+    )
+    if not text:
+        return False
+
+    return any(
+        marker in text
+        for marker in (
+            "оқытушының джж орындау қорытындысы",
+            "джж орындау қорытындысы",
+            "итоги выполнения ип работы преподавателя",
+            "teacher’s individual plan performance",
+            "teacher's individual plan performance",
+            "individual plan performance",
+        )
+    )
+
+
+def infer_performance_summary_binding(raw_tables: Any) -> Dict[str, Any]:
+    table_items = sorted(
+        _raw_tables_iterable(raw_tables),
+        key=lambda item: int(item.get("table_index") or 0),
+    )
+    for item in table_items:
+        if is_performance_summary_raw_table(item):
+            return {"source": "excel", "raw_table_id": int(item["id"])}
+    return {}
+
+
 def build_effective_generation_settings(
     settings_cfg: Dict[str, Any],
     raw_tables: Any,
@@ -320,6 +369,13 @@ def build_effective_generation_settings(
 
     if teaching_load_cfg:
         template_bindings["teaching_load"] = teaching_load_cfg
+
+    existing_performance_binding = get_performance_summary_binding(effective)
+    if not existing_performance_binding:
+        inferred_performance_binding = infer_performance_summary_binding(raw_tables)
+        if inferred_performance_binding:
+            template_bindings["performance_summary"] = inferred_performance_binding
+
     if template_bindings:
         effective["template_bindings"] = template_bindings
 
@@ -346,6 +402,16 @@ def extract_excel_bound_raw_table_ids_with_raw_tables(
     summary_binding = get_teaching_load_summary_binding(effective_settings)
     raw_table_id = summary_binding.get("raw_table_id")
     if not is_excel_source_binding(summary_binding):
+        raw_table_id = None
+    if raw_table_id:
+        try:
+            out.add(int(raw_table_id))
+        except Exception:
+            pass
+
+    performance_binding = get_performance_summary_binding(effective_settings)
+    raw_table_id = performance_binding.get("raw_table_id")
+    if not is_excel_source_binding(performance_binding):
         raw_table_id = None
     if raw_table_id:
         try:

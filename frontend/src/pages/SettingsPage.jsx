@@ -130,6 +130,7 @@ function createDefaultConfig() {
         hourly: { source: "excel" },
         summary: { source: "excel" },
       },
+      performance_summary: { source: "excel" },
     },
   };
 }
@@ -143,6 +144,13 @@ function mergeConfig(baseConfig, loadedConfig = {}) {
     ...(loaded.template_bindings?.teaching_load_summary || {}),
     ...(baseConfig?.template_bindings?.teaching_load?.summary || {}),
     ...(loaded.template_bindings?.teaching_load?.summary || {}),
+  };
+  const mergedPerformanceSummaryBinding = {
+    ...base.template_bindings.performance_summary,
+    ...(baseConfig?.template_bindings?.individual_plan_performance || {}),
+    ...(loaded.template_bindings?.individual_plan_performance || {}),
+    ...(baseConfig?.template_bindings?.performance_summary || {}),
+    ...(loaded.template_bindings?.performance_summary || {}),
   };
 
   return {
@@ -178,11 +186,58 @@ function mergeConfig(baseConfig, loadedConfig = {}) {
       ...base.template_bindings,
       ...(baseConfig?.template_bindings || {}),
       ...(loaded.template_bindings || {}),
+      performance_summary: mergedPerformanceSummaryBinding,
       teaching_load: {
         ...base.template_bindings.teaching_load,
         ...(baseConfig?.template_bindings?.teaching_load || {}),
         ...(loaded.template_bindings?.teaching_load || {}),
         summary: mergedSummaryBinding,
+      },
+    },
+  };
+}
+
+function findPerformanceSummaryTableId(tables) {
+  const markers = [
+    "оқытушының джж орындау қорытындысы",
+    "джж орындау қорытындысы",
+    "итоги выполнения ип работы преподавателя",
+    "teacher’s individual plan performance",
+    "teacher's individual plan performance",
+    "individual plan performance",
+  ];
+
+  const table = (tables || []).find((t) => {
+    const haystack = [
+      t.section_title,
+      t.header_signature,
+      ...(Array.isArray(t.column_hints) ? t.column_hints : []),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    return markers.some((marker) => haystack.includes(marker));
+  });
+
+  return table?.id ? Number(table.id) : undefined;
+}
+
+function applyInferredTableBindings(config, tables) {
+  const currentBinding = config?.template_bindings?.performance_summary || {};
+  if (currentBinding.raw_table_id) return config;
+
+  const inferredRawTableId = findPerformanceSummaryTableId(tables);
+  if (!inferredRawTableId) return config;
+
+  return {
+    ...config,
+    template_bindings: {
+      ...(config.template_bindings || {}),
+      performance_summary: {
+        source: "excel",
+        ...currentBinding,
+        raw_table_id: inferredRawTableId,
       },
     },
   };
@@ -214,6 +269,10 @@ export default function SettingsPage() {
 
   const missingRequired = REQUIRED_COLUMN_KEYS.filter((key) => !cfg.columns[key]);
   const requiredReady = REQUIRED_COLUMN_KEYS.length - missingRequired.length;
+  const cfgWithTableDefaults = useMemo(
+    () => applyInferredTableBindings(cfg, tables),
+    [cfg, tables]
+  );
 
   async function loadExcelTemplates() {
     try {
@@ -284,7 +343,7 @@ export default function SettingsPage() {
       await api.post("/settings/save", {
         department_id: departmentId,
         academic_year: academicYear,
-        config: cfg,
+        config: cfgWithTableDefaults,
       });
       setStatus("Сохранено");
     } catch (e) {
@@ -358,6 +417,20 @@ export default function SettingsPage() {
     setTeachingLoadBinding(loadKind, {
       source: source === "manual" ? "manual" : "excel",
     });
+  }
+
+  function setPerformanceSummaryTable(tableId) {
+    setCfg((prev) => ({
+      ...prev,
+      template_bindings: {
+        ...(prev.template_bindings || {}),
+        performance_summary: {
+          ...(prev.template_bindings?.performance_summary || {}),
+          source: "excel",
+          raw_table_id: tableId ? Number(tableId) : undefined,
+        },
+      },
+    }));
   }
 
   function handleYearChange(value) {
@@ -541,9 +614,10 @@ export default function SettingsPage() {
           ) : (
             <TablesStep
               tables={tables}
-              cfg={cfg}
+              cfg={cfgWithTableDefaults}
               setTeachingLoadTable={setTeachingLoadTable}
               setTeachingLoadSource={setTeachingLoadSource}
+              setPerformanceSummaryTable={setPerformanceSummaryTable}
             />
           )}
         </section>
@@ -700,6 +774,7 @@ function TablesStep({
   cfg,
   setTeachingLoadTable,
   setTeachingLoadSource,
+  setPerformanceSummaryTable,
 }) {
   return (
     <div>
@@ -725,6 +800,12 @@ function TablesStep({
           binding={cfg.template_bindings.teaching_load.summary}
           onTableChange={(v) => setTeachingLoadTable("summary", v)}
           onSourceChange={(v) => setTeachingLoadSource("summary", v)}
+        />
+        <TableBinding
+          label="Итоги выполнения ИП"
+          tables={tables}
+          binding={cfg.template_bindings.performance_summary}
+          onTableChange={setPerformanceSummaryTable}
         />
       </div>
     </div>
@@ -839,13 +920,43 @@ function TeachingLoadBinding({
           <option value="">Выберите таблицу</option>
           {(tables || []).map((t) => (
             <option key={t.id} value={t.id}>
-              Таблица {t.table_index + 1}
+              {tableOptionLabel(t)}
             </option>
           ))}
         </select>
       </div>
     </label>
   );
+}
+
+function TableBinding({ label, tables, binding, onTableChange }) {
+  const value = binding?.raw_table_id || "";
+
+  return (
+    <label style={{ display: "grid", gap: 7 }}>
+      <span style={{ color: "#334155", fontSize: 14, fontWeight: 800 }}>
+        {label}
+      </span>
+      <select
+        value={value}
+        onChange={(e) => onTableChange(e.target.value)}
+        style={selectStyle}
+      >
+        <option value="">Выберите таблицу</option>
+        {(tables || []).map((t) => (
+          <option key={t.id} value={t.id}>
+            {tableOptionLabel(t)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function tableOptionLabel(table) {
+  const index = Number(table?.table_index ?? 0) + 1;
+  const title = String(table?.section_title || "").trim();
+  return title ? `Таблица ${index} - ${title}` : `Таблица ${index}`;
 }
 
 function badgeStyle(color, background) {
