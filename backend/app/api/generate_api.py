@@ -5,7 +5,7 @@ from backend.app.config import GENERATED_DIR
 from backend.app.database import get_connection
 from backend.app.api.auth_api import get_current_user
 from backend.app.utils.generator import generate_docx_for_teacher
-from backend.app.utils.generation_history import insert_generation_history
+from backend.app.utils.generation_history import upsert_generated_file
 from backend.app.utils.storage import safe_resolve_in_dir
 
 router = APIRouter(prefix="/generate", tags=["Generate"])
@@ -117,22 +117,21 @@ def generate_for_teacher(payload: dict, user=Depends(get_current_user)):
             academic_year=academic_year,
         )
 
-        hist_id = insert_generation_history(
-            generated_by_user_id=int(user.get("sub")),
-            generated_by_role=user.get("role"),
+        generated_file_id = upsert_generated_file(
+            last_generated_by_user_id=int(user.get("sub")),
+            last_generated_by_role=user.get("role"),
             generated_for_teacher_id=teacher_id,
             department_id=department_id,
             academic_year=academic_year,
             excel_template_id=excel_template_id_hist,
-            docx_template_id=None,
+            raw_template_id=raw_template_id_hist,
             output_path=out_path,
-            status="success",
-            error_text=None,
         )
 
         return {
             "status": "ok",
-            "history_id": hist_id,
+            "generated_file_id": generated_file_id,
+            "history_id": generated_file_id,
             "output_path": out_path,
             "download_url": f"/generate/download?path={out_path}",
             "raw_template_id": raw_template_id_hist,
@@ -140,19 +139,7 @@ def generate_for_teacher(payload: dict, user=Depends(get_current_user)):
         }
 
     except Exception as e:
-        hist_id = insert_generation_history(
-            generated_by_user_id=int(user.get("sub")),
-            generated_by_role=user.get("role"),
-            generated_for_teacher_id=teacher_id,
-            department_id=department_id,
-            academic_year=academic_year,
-            excel_template_id=excel_template_id_hist,
-            docx_template_id=None,
-            output_path=None,
-            status="error",
-            error_text=str(e),
-        )
-        raise HTTPException(status_code=400, detail=f"{str(e)} (history_id={hist_id})")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/download")

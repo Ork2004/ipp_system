@@ -129,7 +129,7 @@ export default function HomePage() {
         api.get("/form63/templates", { params: { department_id: departmentId } }),
         api.get("/teachers", { params: { department_id: departmentId } }),
         role === "teacher"
-          ? api.get("/history", { params: { limit: 5, offset: 0 } })
+          ? api.get("/history", { params: { limit: 500, offset: 0 } })
           : Promise.resolve({ data: [] }),
       ]);
 
@@ -216,7 +216,7 @@ export default function HomePage() {
             onClick={() => nav(role === "admin" ? "/raw-template-upload" : "/manual-tables")}
           />
           <Stat
-            label={role === "admin" ? "Преподаватели" : "История"}
+            label={role === "admin" ? "Преподаватели" : "Файлы"}
             value={role === "admin" ? String(teachers.length) : String(history.length)}
             onClick={() => nav(role === "admin" ? "/workload-data" : "/generate")}
           />
