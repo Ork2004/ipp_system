@@ -5,11 +5,12 @@
 -- - one Excel per department + year
 -- - one DOCX/raw DOCX per department + year
 -- - generation settings
--- - generation history
+-- - generated files registry
 -- - manual table filling
 -- - carry-over of manual data between years by table structure
 -- ======================================================
 
+DROP TABLE IF EXISTS generated_files CASCADE;
 DROP TABLE IF EXISTS generation_history CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 
@@ -470,41 +471,39 @@ CREATE INDEX ix_manual_loop_cells_stable_column_key
 ON teacher_manual_loop_cell_values(stable_column_key);
 
 -- =========================
--- GENERATION HISTORY
+-- GENERATED FILES
 -- =========================
-CREATE TABLE generation_history (
+CREATE TABLE generated_files (
     id BIGSERIAL PRIMARY KEY,
 
-    generated_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-    generated_by_role TEXT NOT NULL,
-    generated_for_teacher_id BIGINT REFERENCES teachers(id) ON DELETE SET NULL,
+    last_generated_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    last_generated_by_role TEXT NOT NULL,
+    generated_for_teacher_id BIGINT NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
 
-    department_id BIGINT REFERENCES departments(id) ON DELETE SET NULL,
+    department_id BIGINT NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
     academic_year TEXT NOT NULL,
 
     excel_template_id BIGINT REFERENCES excel_templates(id) ON DELETE SET NULL,
-    docx_template_id BIGINT REFERENCES docx_templates(id) ON DELETE SET NULL,
+    raw_template_id BIGINT REFERENCES raw_docx_templates(id) ON DELETE SET NULL,
 
-    output_path TEXT,
-    file_name TEXT,
+    output_path TEXT NOT NULL,
+    file_name TEXT NOT NULL,
 
-    status TEXT NOT NULL DEFAULT 'success',
-    error_text TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    created_at TIMESTAMPTZ DEFAULT now(),
-
-    CONSTRAINT ck_gen_hist_role CHECK (generated_by_role IN ('admin','teacher')),
-    CONSTRAINT ck_gen_hist_status CHECK (status IN ('success','error'))
+    CONSTRAINT uq_generated_file_teacher_year UNIQUE (generated_for_teacher_id, academic_year),
+    CONSTRAINT ck_generated_file_role CHECK (last_generated_by_role IN ('admin','teacher'))
 );
 
-CREATE INDEX ix_gen_hist_for_teacher_time
-ON generation_history(generated_for_teacher_id, created_at DESC);
+CREATE INDEX ix_generated_files_teacher_year
+ON generated_files(generated_for_teacher_id, academic_year);
 
-CREATE INDEX ix_gen_hist_by_user_time
-ON generation_history(generated_by_user_id, created_at DESC);
+CREATE INDEX ix_generated_files_department_year
+ON generated_files(department_id, academic_year);
 
-CREATE INDEX ix_gen_hist_department_time
-ON generation_history(department_id, created_at DESC);
+CREATE INDEX ix_generated_files_last_user_time
+ON generated_files(last_generated_by_user_id, updated_at DESC);
 
 -- =========================
 -- FORM 63 TEMPLATES
