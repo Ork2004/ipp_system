@@ -17,7 +17,7 @@ export default function Navbar() {
           { to: "/raw-template-upload", label: "Шаблон" },
           { to: "/settings", label: "Настройки" },
           { to: "/manual-tables", label: "Таблицы" },
-          { to: "/form63", label: "Форма 64" },
+          { to: "/form63", label: "Форма 63" },
           { to: "/generate", label: "Генерация" },
         ]
       : role === "teacher"
@@ -25,7 +25,7 @@ export default function Navbar() {
           { to: "/home", label: "Главная" },
           { to: "/workload-data", label: "Моя нагрузка" },
           { to: "/manual-tables", label: "Таблицы" },
-          { to: "/form63", label: "Форма 64" },
+          { to: "/form63", label: "Форма 63" },
           { to: "/generate", label: "Генерация" },
         ]
       : [{ to: "/home", label: "Главная" }];

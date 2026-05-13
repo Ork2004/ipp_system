@@ -191,7 +191,7 @@ export default function Form63Page() {
   return (
     <div style={styles.page}>
       <div style={styles.card}>
-        <h1 style={styles.title}>Форма 64</h1>
+        <h1 style={styles.title}>Форма 63</h1>
         <p style={styles.subtitle}>
           {isAdmin
             ? "Шаблон и генерация по нагрузке."
