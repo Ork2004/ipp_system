@@ -1,44 +1,37 @@
 import { NavLink, useNavigate } from "react-router-dom";
+import { clearSession, getRole, getRoleLabel, getToken } from "../session";
+
+const NAV_LINKS_BY_ROLE = {
+  admin: [
+    { to: "/home", label: "Главная" },
+    { to: "/excel-upload", label: "Нагрузка" },
+    { to: "/workload-data", label: "Данные" },
+    { to: "/raw-template-upload", label: "Шаблон" },
+    { to: "/settings", label: "Настройки" },
+    { to: "/manual-tables", label: "Таблицы" },
+    { to: "/form63", label: "Форма 63" },
+    { to: "/generate", label: "Генерация" },
+  ],
+  teacher: [
+    { to: "/home", label: "Главная" },
+    { to: "/workload-data", label: "Моя нагрузка" },
+    { to: "/manual-tables", label: "Таблицы" },
+    { to: "/form63", label: "Форма 63" },
+    { to: "/generate", label: "Генерация" },
+  ],
+  guest: [{ to: "/home", label: "Главная" }],
+};
 
 export default function Navbar() {
   const navigate = useNavigate();
 
-  const token = localStorage.getItem("token");
-  const role = localStorage.getItem("role") || "guest";
-  const roleLabel =
-    role === "admin" ? "Админ" : role === "teacher" ? "Преподаватель" : "Гость";
-
-  const links =
-    role === "admin"
-      ? [
-          { to: "/home", label: "Главная" },
-          { to: "/excel-upload", label: "Нагрузка" },
-          { to: "/workload-data", label: "Данные" },
-          { to: "/raw-template-upload", label: "Шаблон" },
-          { to: "/settings", label: "Настройки" },
-          { to: "/manual-tables", label: "Таблицы" },
-          { to: "/form63", label: "Форма 63" },
-          { to: "/generate", label: "Генерация" },
-        ]
-      : role === "teacher"
-      ? [
-          { to: "/home", label: "Главная" },
-          { to: "/workload-data", label: "Моя нагрузка" },
-          { to: "/manual-tables", label: "Таблицы" },
-          { to: "/form63", label: "Форма 63" },
-          { to: "/generate", label: "Генерация" },
-        ]
-      : [{ to: "/home", label: "Главная" }];
+  const token = getToken();
+  const role = getRole();
+  const roleLabel = getRoleLabel(role);
+  const links = NAV_LINKS_BY_ROLE[role] || NAV_LINKS_BY_ROLE.guest;
 
   function logout() {
-    localStorage.removeItem("token");
-    localStorage.removeItem("role");
-    localStorage.removeItem("teacher_id");
-    localStorage.removeItem("department_id");
-    localStorage.removeItem("excel_template_id");
-    localStorage.removeItem("docx_template_id");
-    localStorage.removeItem("raw_template_id");
-    localStorage.removeItem("academic_year");
+    clearSession();
     navigate("/login");
   }
 

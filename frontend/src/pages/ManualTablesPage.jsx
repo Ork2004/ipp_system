@@ -795,13 +795,13 @@ function compressRow(row) {
   while (i < row.length) {
     const cell = row[i];
     const text = String(cell?.text || "").trim();
-    const editable = !!cell?.editable;
+    const editable = Boolean(cell?.editable);
     if (editable || !text) { out.push({ type: "cell", cell, span: 1 }); i++; continue; }
     let span = 1;
     let j = i + 1;
     while (j < row.length) {
       const next = row[j];
-      if (!!next?.editable) break;
+      if (next?.editable) break;
       if (String(next?.text || "").trim() !== text) break;
       span++; j++;
     }

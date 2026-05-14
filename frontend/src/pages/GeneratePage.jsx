@@ -1,19 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../api";
-
-function fmtDateTime(v) {
-  if (!v) return "";
-  try {
-    return new Date(v).toLocaleString();
-  } catch {
-    return String(v);
-  }
-}
-
-function getApiBaseUrl() {
-  return (api.defaults.baseURL || "http://127.0.0.1:8000").replace(/\/$/, "");
-}
+import { api, getApiBaseUrl } from "../api";
+import { fmtDateTime } from "../utils/date";
 
 const selectStyle = {
   width: 220,

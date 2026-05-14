@@ -1,37 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-
-function fmtDateTime(v) {
-  if (!v) return "";
-  try {
-    return new Date(v).toLocaleString();
-  } catch {
-    return String(v);
-  }
-}
-
-function downloadBlob(blob, filename) {
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename || "file";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.URL.revokeObjectURL(url);
-}
-
-function getAutoAcademicYear() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-  return month >= 8 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
-}
-
-function normalizeAcademicYear(value) {
-  const clean = String(value || "").trim();
-  return clean || getAutoAcademicYear();
-}
+import { normalizeAcademicYear } from "../utils/academicYear";
+import { fmtDateTime } from "../utils/date";
+import { downloadBlob } from "../utils/download";
 
 export default function RawTemplateUploadPage() {
   const [departmentId, setDepartmentId] = useState(
