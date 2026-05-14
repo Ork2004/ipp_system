@@ -10,25 +10,20 @@ import GeneratePage from "./pages/GeneratePage";
 import RawTemplateUploadPage from "./pages/RawTemplateUploadPage";
 import ManualTablesPage from "./pages/ManualTablesPage";
 import Form63Page from "./pages/Form63Page";
+import { getRole, getToken } from "./session";
 
 function RequireAuth({ children }) {
-  const token = localStorage.getItem("token");
-  if (!token) return <Navigate to="/login" replace />;
+  if (!getToken()) return <Navigate to="/login" replace />;
   return children;
 }
 
 function RequireAdmin({ children }) {
-  const token = localStorage.getItem("token");
-  const role = localStorage.getItem("role");
-
-  if (!token) return <Navigate to="/login" replace />;
-  if (role !== "admin") return <Navigate to="/home" replace />;
-  return children;
+  return <RequireRoles roles={["admin"]}>{children}</RequireRoles>;
 }
 
 function RequireRoles({ roles, children }) {
-  const token = localStorage.getItem("token");
-  const role = localStorage.getItem("role") || "guest";
+  const token = getToken();
+  const role = getRole();
 
   if (!token) return <Navigate to="/login" replace />;
   if (!roles.includes(role)) return <Navigate to="/home" replace />;
@@ -107,7 +102,6 @@ export default function App() {
             </RequireRoles>
           }
         />
-
 
         <Route
           path="/form63"

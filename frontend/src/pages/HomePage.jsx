@@ -1,17 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
-
-function getAutoAcademicYear() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1;
-  return month >= 8 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
-}
-
-function currentAcademicYear() {
-  return localStorage.getItem("academic_year") || getAutoAcademicYear();
-}
+import { getStoredAcademicYear as currentAcademicYear } from "../utils/academicYear";
 
 function listForYear(list, year) {
   return (list || []).find((x) => String(x.academic_year) === String(year)) || null;
