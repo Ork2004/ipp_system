@@ -34,8 +34,6 @@ DROP TABLE IF EXISTS excel_rows CASCADE;
 DROP TABLE IF EXISTS excel_columns CASCADE;
 DROP TABLE IF EXISTS excel_templates CASCADE;
 
-DROP TABLE IF EXISTS placeholder_catalog CASCADE;
-
 DROP TABLE IF EXISTS teachers CASCADE;
 DROP TABLE IF EXISTS departments CASCADE;
 
@@ -61,22 +59,6 @@ CREATE TABLE teachers (
     extra_data JSONB,
 
     CONSTRAINT uq_teacher_dept_name UNIQUE (department_id, full_name)
-);
-
--- =========================
--- PLACEHOLDERS CATALOG (ONLY STABLE)
--- =========================
-CREATE TABLE placeholder_catalog (
-    id BIGSERIAL PRIMARY KEY,
-    placeholder_name TEXT NOT NULL UNIQUE,
-    placeholder_type TEXT NOT NULL,
-    category TEXT NOT NULL,
-    description TEXT,
-    example TEXT,
-    created_at TIMESTAMPTZ DEFAULT now(),
-
-    CONSTRAINT ck_catalog_type CHECK (placeholder_type IN ('text')),
-    CONSTRAINT ck_catalog_cat CHECK (category IN ('teacher'))
 );
 
 -- =========================
@@ -597,17 +579,3 @@ VALUES (
     'guest'
 );
 
--- stable teacher placeholders
-INSERT INTO placeholder_catalog (
-    placeholder_name,
-    placeholder_type,
-    category,
-    description,
-    example
-) VALUES
-('teacher.staff_type',      'text', 'teacher', 'Тип ставки/штатности', '{{ teacher.staff_type }}'),
-('teacher.position',        'text', 'teacher', 'Должность',            '{{ teacher.position }}'),
-('teacher.academic_degree', 'text', 'teacher', 'Учёная степень',       '{{ teacher.academic_degree }}'),
-('teacher.full_name',       'text', 'teacher', 'ФИО преподавателя',    '{{ teacher.full_name }}'),
-('teacher.department',      'text', 'teacher', 'Кафедра',              '{{ teacher.department }}'),
-('teacher.faculty',         'text', 'teacher', 'Факультет',            '{{ teacher.faculty }}');

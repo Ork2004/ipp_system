@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.excel_api import router as excel_router
-from backend.app.api.placeholders_api import router as placeholders_router
 from backend.app.api.docx_api import router as docx_router
 from backend.app.api.settings_api import router as settings_router
 from backend.app.api.generate_api import router as generate_router
@@ -36,7 +35,6 @@ app.include_router(teachers_router)
 app.include_router(history_router)
 
 app.include_router(excel_router)
-app.include_router(placeholders_router)
 app.include_router(docx_router)
 app.include_router(settings_router)
 app.include_router(blocks_router)
