@@ -221,7 +221,7 @@ export default function HomePage() {
             onClick={() => nav(role === "admin" ? "/workload-data" : "/generate")}
           />
           <Stat
-            label="Форма 64"
+            label="Форма 63"
             value={form64ForYear ? "Есть" : "Нет"}
             tone={form64ForYear ? "ok" : "warn"}
             onClick={() => nav("/form63")}
@@ -238,14 +238,14 @@ export default function HomePage() {
               <Action label="Шаблон" to="/raw-template-upload" primary={!!excelForYear && !rawForYear} />
               <Action label="Настройки" to="/settings" primary={!!excelForYear && !!rawForYear} />
               <Action label="Генерация" to="/generate" />
-              <Action label="Форма 64" to="/form63" />
+              <Action label="Форма 63" to="/form63" />
             </>
           ) : (
             <>
               <Action label="Моя нагрузка" to="/workload-data" primary />
               <Action label="Таблицы" to="/manual-tables" />
               <Action label="Генерация" to="/generate" />
-              <Action label="Форма 64" to="/form63" />
+              <Action label="Форма 63" to="/form63" />
             </>
           )}
         </div>
