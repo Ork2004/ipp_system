@@ -9,6 +9,7 @@ from backend.app.api.manual_fill_api import router as manual_fill_router
 from backend.app.api.raw_template_api import router as raw_template_router
 from backend.app.api.settings_api import router as settings_router
 from backend.app.api.teachers_api import router as teachers_router
+from backend.app.api.analysis import router as analysis_router
 
 routers = (
     auth_router,
@@ -22,6 +23,7 @@ routers = (
     raw_template_router,
     manual_fill_router,
     form63_router,
+    analysis_router,
 )
 
 __all__ = ["routers"]
