@@ -11,14 +11,17 @@ const NAV_LINKS_BY_ROLE = {
     { to: "/manual-tables", label: "Таблицы" },
     { to: "/form63", label: "Форма 63" },
     { to: "/generate", label: "Генерация" },
+    { to: "/analysis", label: "Анализ" } // ✅ ДОБАВИЛ
   ],
+
   teacher: [
     { to: "/home", label: "Главная" },
     { to: "/workload-data", label: "Моя нагрузка" },
     { to: "/manual-tables", label: "Таблицы" },
     { to: "/form63", label: "Форма 63" },
-    { to: "/generate", label: "Генерация" },
+    { to: "/generate", label: "Генерация" }
   ],
+
   guest: [{ to: "/home", label: "Главная" }],
 };
 

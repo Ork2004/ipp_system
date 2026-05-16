@@ -10,15 +10,15 @@ import GeneratePage from "./pages/GeneratePage";
 import RawTemplateUploadPage from "./pages/RawTemplateUploadPage";
 import ManualTablesPage from "./pages/ManualTablesPage";
 import Form63Page from "./pages/Form63Page";
+import AnalysisPage from "./pages/AnalysisPage"; // ✅ ДОБАВИЛИ
+
 import { getRole, getToken } from "./session";
+
+/* ================= GUARDS ================= */
 
 function RequireAuth({ children }) {
   if (!getToken()) return <Navigate to="/login" replace />;
   return children;
-}
-
-function RequireAdmin({ children }) {
-  return <RequireRoles roles={["admin"]}>{children}</RequireRoles>;
 }
 
 function RequireRoles({ roles, children }) {
@@ -27,8 +27,15 @@ function RequireRoles({ roles, children }) {
 
   if (!token) return <Navigate to="/login" replace />;
   if (!roles.includes(role)) return <Navigate to="/home" replace />;
+
   return children;
 }
+
+function RequireAdmin({ children }) {
+  return <RequireRoles roles={["admin"]}>{children}</RequireRoles>;
+}
+
+/* ================= APP ================= */
 
 export default function App() {
   return (
@@ -36,10 +43,13 @@ export default function App() {
       <Navbar />
 
       <Routes>
+        {/* AUTH */}
         <Route path="/login" element={<LoginPage />} />
 
+        {/* REDIRECT */}
         <Route path="/" element={<Navigate to="/home" replace />} />
 
+        {/* HOME */}
         <Route
           path="/home"
           element={
@@ -49,6 +59,7 @@ export default function App() {
           }
         />
 
+        {/* GENERATE */}
         <Route
           path="/generate"
           element={
@@ -58,21 +69,13 @@ export default function App() {
           }
         />
 
+        {/* ADMIN ONLY */}
         <Route
           path="/excel-upload"
           element={
             <RequireAdmin>
               <ExcelUploadPage />
             </RequireAdmin>
-          }
-        />
-
-        <Route
-          path="/workload-data"
-          element={
-            <RequireRoles roles={["admin", "teacher"]}>
-              <WorkloadDataPage />
-            </RequireRoles>
           }
         />
 
@@ -94,6 +97,16 @@ export default function App() {
           }
         />
 
+        {/* SHARED */}
+        <Route
+          path="/workload-data"
+          element={
+            <RequireRoles roles={["admin", "teacher"]}>
+              <WorkloadDataPage />
+            </RequireRoles>
+          }
+        />
+
         <Route
           path="/manual-tables"
           element={
@@ -112,6 +125,17 @@ export default function App() {
           }
         />
 
+        {/* 🔥 NEW ANALYSIS PAGE */}
+        <Route
+          path="/analysis"
+          element={
+            <RequireRoles roles={["admin"]}>
+              <AnalysisPage />
+            </RequireRoles>
+          }
+        />
+
+        {/* FALLBACK */}
         <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>
     </BrowserRouter>
