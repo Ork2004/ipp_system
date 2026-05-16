@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -8,52 +8,24 @@ from backend.app.database import get_connection
 router = APIRouter(prefix="/analysis", tags=["analysis"])
 
 # ──────────────────────────────────────────────────────────
-# Индексы колонок Excel (строка 7 = заголовки, данные с 8)
+# Ключи в row_data (русские названия колонок из Excel)
 # ──────────────────────────────────────────────────────────
-COL_IDX = {
-    "teacher_name": 24,  # ФИО ППС
-    "position":     25,  # Должность
-    "kind":          1,  # вид занятии
-    "total":        16,  # Итого
-    "discipline":    3,  # Дисциплина
-}
+KEY_TEACHER  = "ФИО ППС"
+KEY_POSITION = "Должность"
+KEY_KIND     = "вид занятии"
+KEY_TOTAL    = "Итого"
+KEY_DISC     = "Дисциплина"
 
 LECTURE_KINDS  = {"лек", "лек."}
 PRACTICE_KINDS = {"лаб/пра", "лаб", "пра", "практ", "практика"}
 MOOC_KINDS     = {"моок", "моок-0", "моок-1"}
 
 
-# ──────────────────────────────────────────────────────────
-# Helpers
-# ──────────────────────────────────────────────────────────
-
 def _safe_float(val) -> float:
     try:
         return float(val or 0)
     except (TypeError, ValueError):
         return 0.0
-
-
-def _idx_to_col(n: int) -> str:
-    """0→A, 1→B, 25→Z, 26→AA ..."""
-    result = ""
-    n += 1
-    while n:
-        n, r = divmod(n - 1, 26)
-        result = chr(65 + r) + result
-    return result
-
-
-def _get(rd: dict, idx: int):
-    """Достаём значение из row_data по индексу колонки."""
-    if idx in rd:
-        return rd[idx]
-    if str(idx) in rd:
-        return rd[str(idx)]
-    letter = _idx_to_col(idx)
-    if letter in rd:
-        return rd[letter]
-    return None
 
 
 def _parse_rows(rows, dept_name: str, academic_year: str) -> dict:
@@ -64,20 +36,25 @@ def _parse_rows(rows, dept_name: str, academic_year: str) -> dict:
     })
 
     for row in rows:
-        rd = row["row_data"] or {}
-        name = str(_get(rd, COL_IDX["teacher_name"]) or "").strip()
+        row_id = row[0]
+        rd     = row[1]  # dict с русскими ключами
+
+        if not isinstance(rd, dict):
+            continue
+
+        name = str(rd.get(KEY_TEACHER) or "").strip()
         if not name:
             continue
 
-        kind  = str(_get(rd, COL_IDX["kind"]) or "").strip().lower()
-        hours = _safe_float(_get(rd, COL_IDX["total"]))
-        pos   = str(_get(rd, COL_IDX["position"]) or "").strip() or None
-        disc  = str(_get(rd, COL_IDX["discipline"]) or "").strip()
+        kind  = str(rd.get(KEY_KIND) or "").strip().lower()
+        hours = _safe_float(rd.get(KEY_TOTAL))
+        pos   = str(rd.get(KEY_POSITION) or "").strip() or None
+        disc  = str(rd.get(KEY_DISC) or "").strip()
 
         b = buckets[name]
-        b["total"] += hours
+        b["total"]   += hours
         b["position"] = b["position"] or pos
-        b["row_id"]   = b["row_id"] or row["id"]
+        b["row_id"]   = b["row_id"] or row_id
         if disc:
             b["disciplines"].add(disc)
 
@@ -103,7 +80,6 @@ def _parse_rows(rows, dept_name: str, academic_year: str) -> dict:
             "practice_hours": round(b["practice"], 2),
             "mooc_hours": round(b["mooc"], 2),
             "other_hours": round(b["other"], 2),
-            # алиасы для фронта (AnalysisPage.jsx)
             "scientific_hours": round(b["mooc"], 2),
             "teaching_auditory": round(b["lecture"], 2),
             "teaching_extraauditory": round(b["practice"], 2),
@@ -112,10 +88,6 @@ def _parse_rows(rows, dept_name: str, academic_year: str) -> dict:
         }
     return result
 
-
-# ──────────────────────────────────────────────────────────
-# GET /analysis
-# ──────────────────────────────────────────────────────────
 
 @router.get("")
 async def get_analysis(
@@ -126,9 +98,8 @@ async def get_analysis(
         conn = get_connection()
         cur  = conn.cursor()
 
-        # Получаем excel_templates
         q = """
-            SELECT et.id, et.academic_year, d.name AS dept_name
+            SELECT et.id, et.academic_year, d.name
             FROM excel_templates et
             LEFT JOIN departments d ON d.id = et.department_id
             WHERE et.status = 'parsed'
@@ -147,47 +118,36 @@ async def get_analysis(
         all_teachers = {}
 
         for tmpl in templates:
-            tmpl_id      = tmpl["id"]
-            dept_name    = tmpl["dept_name"] or ""
-            acad_year    = tmpl["academic_year"]
+            tmpl_id   = tmpl[0]
+            acad_year = tmpl[1]
+            dept_name = tmpl[2] or ""
 
             cur.execute(
                 "SELECT id, row_data FROM excel_rows WHERE template_id = %s",
                 (tmpl_id,)
             )
             rows = cur.fetchall()
-
             parsed = _parse_rows(rows, dept_name, acad_year)
 
             for name, t in parsed.items():
                 if name in all_teachers:
                     ex = all_teachers[name]
-                    ex["total_hours"]           += t["total_hours"]
-                    ex["lecture_hours"]          += t["lecture_hours"]
-                    ex["practice_hours"]         += t["practice_hours"]
-                    ex["mooc_hours"]             += t["mooc_hours"]
-                    ex["other_hours"]            += t["other_hours"]
-                    ex["scientific_hours"]       += t["scientific_hours"]
-                    ex["teaching_auditory"]      += t["teaching_auditory"]
-                    ex["teaching_extraauditory"] += t["teaching_extraauditory"]
-                    ex["total"]                  += t["total"]
-                    ex["disciplines_count"]      += t["disciplines_count"]
+                    for key in ["total_hours", "lecture_hours", "practice_hours",
+                                "mooc_hours", "other_hours", "scientific_hours",
+                                "teaching_auditory", "teaching_extraauditory",
+                                "total", "disciplines_count"]:
+                        ex[key] += t[key]
                 else:
                     all_teachers[name] = t
 
         cur.close()
         conn.close()
 
-        result = sorted(all_teachers.values(), key=lambda x: x["total"], reverse=True)
-        return result
+        return sorted(all_teachers.values(), key=lambda x: x["total"], reverse=True)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# ──────────────────────────────────────────────────────────
-# GET /analysis/years
-# ──────────────────────────────────────────────────────────
 
 @router.get("/years")
 async def get_years():
@@ -195,19 +155,15 @@ async def get_years():
         conn = get_connection()
         cur  = conn.cursor()
         cur.execute(
-            "SELECT DISTINCT academic_year FROM excel_templates WHERE status='parsed' ORDER BY academic_year DESC"
+            "SELECT DISTINCT academic_year FROM excel_templates WHERE status = 'parsed' ORDER BY academic_year DESC"
         )
         rows = cur.fetchall()
         cur.close()
         conn.close()
-        return [r["academic_year"] for r in rows]
+        return [r[0] for r in rows]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# ──────────────────────────────────────────────────────────
-# GET /analysis/departments
-# ──────────────────────────────────────────────────────────
 
 @router.get("/departments")
 async def get_departments():
@@ -218,6 +174,6 @@ async def get_departments():
         rows = cur.fetchall()
         cur.close()
         conn.close()
-        return [{"id": r["id"], "name": r["name"]} for r in rows]
+        return [{"id": r[0], "name": r[1]} for r in rows]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
