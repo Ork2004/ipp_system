@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 
 const CATEGORY_LABELS = {
@@ -37,6 +37,30 @@ const CATEGORY_ORDER = [
   "hourly_extraauditory",
 ];
 
+const yearInputStyle = {
+  width: 220,
+  height: 52,
+  borderRadius: 14,
+  border: "1px solid #d9e3f5",
+  background: "#f8fbff",
+  boxShadow: "inset 0 1px 2px rgba(15,23,42,0.03)",
+  color: "#17356f",
+  WebkitTextFillColor: "#17356f",
+  fontWeight: 700,
+  fontSize: 16,
+  padding: "0 16px",
+  outline: "none",
+  opacity: 1,
+  caretColor: "#17356f",
+};
+
+const topLabelStyle = {
+  fontSize: 14,
+  fontWeight: 700,
+  color: "#5f7195",
+  marginBottom: 8,
+};
+
 export default function Form63Page() {
   const role = localStorage.getItem("role") || "guest";
   const isAdmin = role === "admin";
@@ -49,6 +73,7 @@ export default function Form63Page() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [downloading, setDownloading] = useState(false);
+
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
 
@@ -56,49 +81,81 @@ export default function Form63Page() {
   const fileInputRef = useRef(null);
 
   const departmentId = localStorage.getItem("department_id");
-  const academicYear = localStorage.getItem("academic_year");
+  const [academicYear, setAcademicYear] = useState(
+    localStorage.getItem("academic_year") || "2025-2026"
+  );
+
+  const selectedTpl = useMemo(() => {
+    return (
+      form63Templates.find((t) => t.id === selectedTplId) || null
+    );
+  }, [form63Templates, selectedTplId]);
 
   useEffect(() => {
     refreshAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line
   }, [departmentId, academicYear]);
 
   async function refreshAll() {
     setError("");
     setLoading(true);
+
     try {
       if (!departmentId || !academicYear) {
-        throw new Error("Не найден department_id или academic_year в localStorage");
-      }
-
-      const excelRes = await api.get(`/excel/templates?department_id=${departmentId}`);
-      const excelTemplates = Array.isArray(excelRes.data) ? excelRes.data : [];
-      const currentExcel = excelTemplates.find(
-        (t) => String(t.academic_year) === String(academicYear),
-      );
-      if (!currentExcel) {
         throw new Error(
-          `Не найден Excel шаблон с нагрузкой для кафедры ${departmentId} и года ${academicYear}`,
+          "Не найден department_id или academic_year"
         );
       }
+
+      const excelRes = await api.get("/excel/templates", {
+        params: { department_id: departmentId },
+      });
+
+      const excelTemplates = Array.isArray(excelRes.data)
+        ? excelRes.data
+        : [];
+
+      const currentExcel = excelTemplates.find(
+        (t) =>
+          String(t.academic_year) === String(academicYear)
+      );
+
+      if (!currentExcel) {
+        throw new Error(
+          `Не найден Excel шаблон с нагрузкой для кафедры ${departmentId} и года ${academicYear}`
+        );
+      }
+
       setExcelInfo({
         excelTemplateId: currentExcel.id,
         sourceFilename: currentExcel.source_filename,
       });
 
-      const tplRes = await api.get(`/form63/templates?department_id=${departmentId}`);
-      const tpls = Array.isArray(tplRes.data) ? tplRes.data : [];
-      setForm63Templates(tpls);
-      const currentTpl = tpls.find(
-        (t) => String(t.academic_year) === String(academicYear),
-      );
-      setSelectedTplId(currentTpl ? currentTpl.id : tpls[0]?.id ?? null);
+      const tplRes = await api.get("/form63/templates", {
+        params: { department_id: departmentId },
+      });
 
-      if (isAdmin) {
+      const tpls = Array.isArray(tplRes.data)
+        ? tplRes.data
+        : [];
+
+      setForm63Templates(tpls);
+
+      const currentTpl = tpls.find(
+        (t) =>
+          String(t.academic_year) === String(academicYear)
+      );
+
+      setSelectedTplId(
+        currentTpl ? currentTpl.id : tpls[0]?.id ?? null
+      );
+
+      if (isAdmin && currentExcel?.id) {
         try {
           const iupRes = await api.get(
-            `/form63/iup-status?excel_template_id=${currentExcel.id}`,
+            `/form63/iup-status?excel_template_id=${currentExcel.id}`
           );
+
           if (iupRes.data?.status === "ok") {
             setIupStatus(iupRes.data);
           } else {
@@ -107,225 +164,487 @@ export default function Form63Page() {
         } catch {
           setIupStatus(null);
         }
-      } else {
-        setIupStatus(null);
       }
     } catch (e) {
-      setError(e?.response?.data?.detail || e.message || "Ошибка загрузки данных");
+      setError(
+        e?.response?.data?.detail ||
+          e.message ||
+          "Ошибка загрузки"
+      );
     } finally {
       setLoading(false);
     }
   }
 
   async function handleUpload() {
-    if (!isAdmin) return;
     if (!uploadFile) return;
+
+    setUploading(true);
     setError("");
     setInfo("");
-    setUploading(true);
+
     try {
       const formData = new FormData();
+
       formData.append("department_id", departmentId);
       formData.append("academic_year", academicYear);
       formData.append("file", uploadFile);
 
-      const res = await api.post("/form63/templates", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const res = await api.post(
+        "/form63/templates",
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        }
+      );
 
-      setInfo(`Шаблон "${res.data.source_filename}" загружен и распознан.`);
+      setInfo(
+        `Шаблон "${res.data.source_filename}" загружен`
+      );
+
       setUploadFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+
       await refreshAll();
+
       setSelectedTplId(res.data.id);
     } catch (e) {
-      setError(e?.response?.data?.detail || e.message || "Ошибка загрузки шаблона");
+      setError(
+        e?.response?.data?.detail ||
+          e.message ||
+          "Ошибка загрузки"
+      );
     } finally {
       setUploading(false);
     }
   }
 
   async function handleDelete(id) {
-    if (!isAdmin) return;
-    if (!confirm("Удалить шаблон формы 64?")) return;
-    setError("");
+    const ok = window.confirm(
+      "Удалить шаблон формы 63?"
+    );
+
+    if (!ok) return;
+
     try {
       await api.delete(`/form63/templates/${id}`);
-      setInfo("Шаблон удалён.");
+
+      setInfo("Шаблон удалён");
+
       await refreshAll();
     } catch (e) {
-      setError(e?.response?.data?.detail || e.message || "Ошибка удаления");
+      setError(
+        e?.response?.data?.detail ||
+          e.message ||
+          "Ошибка удаления"
+      );
     }
   }
 
   async function handleDownload() {
-    if (!excelInfo?.excelTemplateId || !selectedTplId) return;
-    setError("");
+    if (!excelInfo?.excelTemplateId || !selectedTplId)
+      return;
+
     setDownloading(true);
+    setError("");
+
     try {
       const res = await api.get(
         `/form63/export-template?excel_template_id=${excelInfo.excelTemplateId}&form63_template_id=${selectedTplId}`,
-        { responseType: "blob" },
+        {
+          responseType: "blob",
+        }
       );
 
       const blob = new Blob([res.data], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
+
       const url = window.URL.createObjectURL(blob);
+
       const a = document.createElement("a");
       a.href = url;
-      a.download = `form64_${academicYear}.xlsx`;
+      a.download = `form63_${academicYear}.xlsx`;
+
       document.body.appendChild(a);
       a.click();
       a.remove();
+
       window.URL.revokeObjectURL(url);
     } catch (e) {
-      setError(e?.response?.data?.detail || "Ошибка при скачивании");
+      setError(
+        e?.response?.data?.detail ||
+          "Ошибка скачивания"
+      );
     } finally {
       setDownloading(false);
     }
   }
 
-  const selectedTpl = form63Templates.find((t) => t.id === selectedTplId) || null;
-
   return (
-    <div style={styles.page}>
-      <div style={styles.card}>
-        <h1 style={styles.title}>Форма 63</h1>
-        <p style={styles.subtitle}>
-          {isAdmin
-            ? "Шаблон и генерация по нагрузке."
-            : "Генерация по вашим данным."}
-        </p>
+    <div
+      className="container"
+      style={{
+        maxWidth: 1280,
+        paddingTop: 28,
+        paddingBottom: 40,
+      }}
+    >
+      <div
+        className="page-title"
+        style={{
+          fontSize: 52,
+          fontWeight: 800,
+          lineHeight: 1.05,
+          letterSpacing: "-0.03em",
+          marginBottom: 24,
+          color: "#17356f",
+        }}
+      >
+        Форма 63
+      </div>
 
-        <div style={styles.infoBox}>
-          <div style={styles.row}>
-            <span style={styles.label}>Кафедра ID:</span>
-            <span>{departmentId || "-"}</span>
+      <div
+        className="card card-pad"
+        style={{
+          borderRadius: 28,
+          padding: 24,
+          background: "rgba(255,255,255,0.94)",
+          border: "1px solid rgba(30,58,138,0.08)",
+          boxShadow: "0 16px 50px rgba(15, 23, 42, 0.08)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            gap: 18,
+            flexWrap: "wrap",
+            alignItems: "flex-end",
+            marginBottom: 20,
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div style={topLabelStyle}>
+              Учебный год
+            </div>
+
+            <input
+              value={academicYear}
+              onChange={(e) => {
+                setAcademicYear(e.target.value);
+
+                localStorage.setItem(
+                  "academic_year",
+                  e.target.value
+                );
+              }}
+              style={yearInputStyle}
+            />
           </div>
-          <div style={styles.row}>
-            <span style={styles.label}>Учебный год:</span>
-            <span>{academicYear || "-"}</span>
-          </div>
-          <div style={styles.row}>
-            <span style={styles.label}>Excel с нагрузкой:</span>
-            <span>{excelInfo?.sourceFilename || "—"}</span>
+
+          <div
+            className="small"
+            style={{
+              color: "#7c8aa5",
+              fontWeight: 600,
+              minHeight: 24,
+              paddingBottom: 10,
+            }}
+          >
+            {loading ? "Загрузка..." : ""}
           </div>
         </div>
 
-        {loading && <div style={styles.status}>Загрузка данных...</div>}
-        {info && <div style={styles.statusOk}>{info}</div>}
-        {error && <div style={styles.error}>{error}</div>}
+        <div
+          style={{
+            borderRadius: 22,
+            border: "1px solid #e4ebf7",
+            background: "#fff",
+            overflow: "hidden",
+            marginBottom: 18,
+          }}
+        >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "260px 1fr",
+            }}
+          >
+            <InfoRow
+              label="Кафедра ID"
+              value={departmentId || "-"}
+            />
 
-        {iupStatus && (
-          <div style={styles.iupStatusBox}>
-            <div style={styles.iupStatusTop}>
-              <strong>Статус заполнения ИУП</strong>
-              <span style={styles.iupCounter}>
-                {iupStatus.teachers_with_iup} из {iupStatus.total_teachers}
-              </span>
-            </div>
-            <p style={styles.iupHint}>
-              Категории K–R берутся из сводной таблицы ИУП учителя. Для тех, у
-              кого ИУП ещё не заполнен, K–L заполнятся из Excel-нагрузки, а
-              M–R останутся пустыми.
-            </p>
-            {iupStatus.teachers && iupStatus.teachers.length > 0 && (
-              <div style={styles.iupList}>
-                {iupStatus.teachers.map((t) => (
-                  <div key={t.teacher_name} style={styles.iupRow}>
-                    <span
-                      style={{
-                        ...styles.iupBadge,
-                        background: t.iup_filled ? "#dcfce7" : "#fef3c7",
-                        color: t.iup_filled ? "#166534" : "#92400e",
-                      }}
-                    >
-                      {t.iup_filled ? "ИУП" : "Excel"}
-                    </span>
-                    <span>{t.teacher_name}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <InfoRow
+              label="Excel с нагрузкой"
+              value={
+                excelInfo?.sourceFilename || "—"
+              }
+            />
+          </div>
+        </div>
+
+        {info && (
+          <div style={styles.successBox}>
+            {info}
           </div>
         )}
 
-        {isAdmin ? (
-          <>
-            <h2 style={styles.h2}>Загрузить шаблон</h2>
-            <div style={styles.uploadBox}>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx"
-                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-              />
-              <button
-                style={styles.secondaryButton}
-                onClick={handleUpload}
-                disabled={!uploadFile || uploading}
-              >
-                {uploading ? "Загрузка..." : "Загрузить"}
-              </button>
-            </div>
-          </>
-        ) : null}
+        {error && (
+          <div style={styles.errorBox}>
+            {error}
+          </div>
+        )}
 
-        <h2 style={styles.h2}>{isAdmin ? "Загруженные шаблоны" : "Шаблон"}</h2>
-        {form63Templates.length === 0 ? (
-          <div style={styles.muted}>Шаблон не найден.</div>
-        ) : (
-          <div style={styles.tplList}>
-            {form63Templates.map((t) => (
-              <label key={t.id} style={styles.tplItem}>
+        {iupStatus && (
+          <div style={styles.iupBox}>
+            <div style={styles.iupTop}>
+              <strong>
+                Статус заполнения ИУП
+              </strong>
+
+              <span style={styles.iupCounter}>
+                {iupStatus.teachers_with_iup} из{" "}
+                {iupStatus.total_teachers}
+              </span>
+            </div>
+
+            <p style={styles.iupText}>
+              Категории K–R берутся из ИУП.
+            </p>
+
+            <div style={styles.iupList}>
+              {iupStatus.teachers?.map((t) => (
+                <div
+                  key={t.teacher_name}
+                  style={styles.iupRow}
+                >
+                  <span
+                    style={{
+                      ...styles.iupBadge,
+                      background: t.iup_filled
+                        ? "#dcfce7"
+                        : "#fef3c7",
+                      color: t.iup_filled
+                        ? "#166534"
+                        : "#92400e",
+                    }}
+                  >
+                    {t.iup_filled
+                      ? "ИУП"
+                      : "Excel"}
+                  </span>
+
+                  <span>{t.teacher_name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {isAdmin && (
+          <>
+            <div
+              className="section-title"
+              style={styles.sectionTitle}
+            >
+              Загрузить шаблон
+            </div>
+
+            <div style={styles.uploadBox}>
+  <input
+    ref={fileInputRef}
+    type="file"
+    accept=".xlsx,.xls"
+    id="form63-file"
+    style={{ display: "none" }}
+    onChange={(e) =>
+      setUploadFile(
+        e.target.files?.[0] || null
+      )
+    }
+  />
+
+  <button
+    className="btn btn-primary"
+    onClick={() =>
+      document
+        .getElementById("form63-file")
+        .click()
+    }
+    style={styles.bigButton}
+  >
+    Выбрать файл
+  </button>
+
+  <div style={styles.fileName}>
+    {uploadFile
+      ? `Файл: ${uploadFile.name}`
+      : "Файл не выбран"}
+  </div>
+</div>
+
+<div
+  className="actions-row"
+  style={{
+    marginBottom: 20,
+  }}
+>
+  <button
+    className="btn btn-primary"
+    onClick={handleUpload}
+    disabled={
+      uploading || !uploadFile
+    }
+    style={{
+      minWidth: 150,
+      height: 46,
+      borderRadius: 14,
+      fontWeight: 700,
+      boxShadow:
+        "0 12px 24px rgba(58,110,255,0.18)",
+    }}
+  >
+    {uploading
+      ? "Загрузка..."
+      : "Загрузить"}
+  </button>
+</div>
+          </>
+        )}
+
+        <div
+          className="section-title"
+          style={styles.sectionTitle}
+        >
+          Загруженные шаблоны
+        </div>
+
+        <div
+          style={{
+            borderRadius: 20,
+            border: "1px solid #e4ebf7",
+            overflow: "hidden",
+            background: "#fff",
+          }}
+        >
+          {form63Templates.length === 0 ? (
+            <div style={styles.empty}>
+              Шаблон не найден
+            </div>
+          ) : (
+            form63Templates.map((t) => (
+              <label
+                key={t.id}
+                style={{
+                  ...styles.templateRow,
+                  borderBottom:
+                    t.id !==
+                    form63Templates[
+                      form63Templates.length - 1
+                    ]?.id
+                      ? "1px solid #eef2ff"
+                      : "none",
+                }}
+              >
                 <input
                   type="radio"
-                  name="form63tpl"
                   checked={selectedTplId === t.id}
-                  onChange={() => setSelectedTplId(t.id)}
+                  onChange={() =>
+                    setSelectedTplId(t.id)
+                  }
                 />
-                <div style={styles.tplBody}>
-                  <div style={styles.tplHeader}>
-                    <strong>{t.source_filename || `Шаблон #${t.id}`}</strong>
-                    <span style={styles.tplYear}>{t.academic_year}</span>
+
+                <div style={{ flex: 1 }}>
+                  <div style={styles.templateTop}>
+                    <strong
+                      style={{
+                        color: "#17356f",
+                      }}
+                    >
+                      {t.source_filename}
+                    </strong>
+
+                    <span style={styles.yearBadge}>
+                      {t.academic_year}
+                    </span>
                   </div>
-                  <div style={styles.tplMeta}>
-                    Стартовая строка: <b>{t.data_start_row}</b> · колонок
-                    распознано:{" "}
-                    <b>{Object.keys(t.column_mapping || {}).length}</b>
+
+                  <div style={styles.templateMeta}>
+                    Строка:{" "}
+                    <b>{t.data_start_row}</b> ·
+                    колонок:{" "}
+                    <b>
+                      {
+                        Object.keys(
+                          t.column_mapping || {}
+                        ).length
+                      }
+                    </b>
                   </div>
                 </div>
-                {isAdmin ? (
+
+                {isAdmin && (
                   <button
-                    style={styles.deleteButton}
                     onClick={(e) => {
                       e.preventDefault();
                       handleDelete(t.id);
                     }}
+                    style={styles.deleteButton}
                   >
                     Удалить
                   </button>
-                ) : null}
+                )}
               </label>
-            ))}
-          </div>
-        )}
+            ))
+          )}
+        </div>
 
         {isAdmin && selectedTpl && (
           <>
-            <h2 style={styles.h2}>Распознанный маппинг колонок</h2>
-            <div style={styles.mappingBox}>
+            <div
+              className="section-title"
+              style={styles.sectionTitle}
+            >
+              Маппинг колонок
+            </div>
+
+            <div style={styles.mappingGrid}>
               {CATEGORY_ORDER.map((cat) => (
-                <div key={cat} style={styles.mappingRow}>
-                  <span style={styles.mappingLabel}>{CATEGORY_LABELS[cat]}</span>
-                  <span style={styles.mappingValue}>
-                    {selectedTpl.column_mapping?.[cat] ? (
-                      <code style={styles.code}>{selectedTpl.column_mapping[cat]}</code>
+                <div
+                  key={cat}
+                  style={styles.mappingCard}
+                >
+                  <div style={styles.mappingLabel}>
+                    {CATEGORY_LABELS[cat]}
+                  </div>
+
+                  <div style={styles.mappingValue}>
+                    {selectedTpl.column_mapping?.[
+                      cat
+                    ] ? (
+                      <code style={styles.code}>
+                        {
+                          selectedTpl.column_mapping[
+                            cat
+                          ]
+                        }
+                      </code>
                     ) : (
-                      <span style={styles.missing}>не найдено</span>
+                      <span
+                        style={{
+                          color: "#b91c1c",
+                        }}
+                      >
+                        не найдено
+                      </span>
                     )}
-                  </span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -333,217 +652,262 @@ export default function Form63Page() {
         )}
 
         <button
-          style={styles.button}
+          className="btn btn-primary"
           onClick={handleDownload}
           disabled={
-            loading ||
             downloading ||
             !excelInfo?.excelTemplateId ||
             !selectedTplId
           }
+          style={styles.downloadButton}
         >
-          {downloading ? "Формирование..." : "Сформировать и скачать"}
+          {downloading
+            ? "Формирование..."
+            : "Сформировать и скачать"}
         </button>
       </div>
     </div>
   );
 }
 
+function InfoRow({ label, value }) {
+  return (
+    <>
+      <div
+        style={{
+          padding: "18px 20px",
+          borderBottom: "1px solid #eef2ff",
+          background: "#f8fbff",
+          fontWeight: 700,
+          color: "#5f7195",
+        }}
+      >
+        {label}
+      </div>
+
+      <div
+        style={{
+          padding: "18px 20px",
+          borderBottom: "1px solid #eef2ff",
+          color: "#17356f",
+          fontWeight: 600,
+        }}
+      >
+        {value}
+      </div>
+    </>
+  );
+}
+
 const styles = {
-  page: {
-    minHeight: "100vh",
-    background: "#f5f7fb",
-    padding: "32px",
+  sectionTitle: {
+    marginTop: 26,
+    marginBottom: 14,
+    fontSize: 32,
+    fontWeight: 800,
+    color: "#17356f",
+    letterSpacing: "-0.02em",
   },
-  card: {
-    maxWidth: "820px",
-    margin: "0 auto",
-    background: "#fff",
-    borderRadius: "20px",
-    padding: "28px",
-    boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
+
+  uploadBox: {
+    borderRadius: 24,
+    border: "2px dashed #b8cdfd",
+    background:
+      "linear-gradient(180deg, rgba(58,110,255,0.07) 0%, rgba(58,110,255,0.03) 100%)",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: "28px 20px",
+    marginBottom: 18,
   },
-  title: { margin: 0, fontSize: "32px", fontWeight: 700, color: "#1e2a3a" },
-  h2: { marginTop: "28px", marginBottom: "12px", fontSize: "18px", color: "#1e2a3a" },
-  subtitle: {
-    marginTop: "10px",
-    marginBottom: "24px",
-    color: "#5b6472",
-    fontSize: "16px",
+
+  bigButton: {
+    minWidth: 170,
+    height: 50,
+    borderRadius: 14,
+    fontWeight: 700,
+    fontSize: 16,
+    boxShadow:
+      "0 12px 28px rgba(58,110,255,0.22)",
   },
-  infoBox: {
-    border: "1px solid #e5e7eb",
-    borderRadius: "14px",
+
+  uploadButton: {
+    marginTop: 16,
+    minWidth: 170,
+    height: 48,
+    borderRadius: 14,
+    fontWeight: 700,
+  },
+
+  fileName: {
+    marginTop: 14,
+    fontSize: 15,
+    color: "#17356f",
+    fontWeight: 600,
+  },
+
+  templateRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 14,
     padding: "18px",
-    background: "#fafbff",
-    marginBottom: "10px",
+    background: "#fff",
   },
-  row: {
+
+  templateTop: {
     display: "flex",
     justifyContent: "space-between",
-    gap: "16px",
-    padding: "8px 0",
-    borderBottom: "1px solid #eef1f6",
-  },
-  label: { fontWeight: 600, color: "#334155" },
-  uploadBox: {
-    display: "flex",
-    gap: "12px",
     alignItems: "center",
-    padding: "14px",
-    border: "1px dashed #cbd5e1",
-    borderRadius: "12px",
-    background: "#fbfdff",
   },
-  tplList: { display: "flex", flexDirection: "column", gap: "8px" },
-  tplItem: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-    padding: "12px 14px",
-    border: "1px solid #e5e7eb",
-    borderRadius: "12px",
-    cursor: "pointer",
-    background: "#fff",
-  },
-  tplBody: { flex: 1 },
-  tplHeader: { display: "flex", justifyContent: "space-between" },
-  tplYear: {
-    fontSize: "13px",
+
+  templateMeta: {
+    marginTop: 6,
+    fontSize: 14,
     color: "#6b7280",
-    background: "#f3f4f6",
-    padding: "2px 8px",
-    borderRadius: "8px",
   },
-  tplMeta: { fontSize: "13px", color: "#6b7280", marginTop: "4px" },
+
+  yearBadge: {
+    background: "#eef2ff",
+    color: "#315fcb",
+    padding: "5px 10px",
+    borderRadius: 999,
+    fontSize: 13,
+    fontWeight: 700,
+  },
+
   deleteButton: {
     border: "1px solid #fecaca",
-    background: "#fef2f2",
+    background: "#fff1f2",
     color: "#b91c1c",
-    padding: "6px 10px",
-    borderRadius: "8px",
+    padding: "10px 14px",
+    borderRadius: 12,
     cursor: "pointer",
-    fontSize: "13px",
+    fontWeight: 700,
   },
-  mappingBox: {
+
+  mappingGrid: {
     display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: "6px 16px",
-    border: "1px solid #e5e7eb",
-    borderRadius: "12px",
-    padding: "14px",
-    background: "#fafbff",
+    gridTemplateColumns:
+      "repeat(auto-fit, minmax(240px, 1fr))",
+    gap: 14,
   },
-  mappingRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    fontSize: "14px",
-    padding: "4px 0",
+
+  mappingCard: {
+    border: "1px solid #e4ebf7",
+    borderRadius: 18,
+    padding: 16,
+    background: "#fbfdff",
   },
-  mappingLabel: { color: "#334155" },
-  mappingValue: { color: "#0f172a" },
+
+  mappingLabel: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#5f7195",
+    marginBottom: 10,
+  },
+
+  mappingValue: {
+    color: "#17356f",
+    fontWeight: 700,
+  },
+
   code: {
     background: "#eef2ff",
     color: "#3730a3",
-    padding: "1px 6px",
-    borderRadius: "6px",
+    padding: "4px 8px",
+    borderRadius: 8,
     fontFamily: "monospace",
-    fontSize: "13px",
+    fontSize: 13,
   },
-  missing: { color: "#b91c1c", fontStyle: "italic" },
-  muted: { color: "#6b7280", fontSize: "14px" },
-  button: {
-    marginTop: "20px",
+
+  downloadButton: {
+    marginTop: 26,
     width: "100%",
-    border: "none",
-    borderRadius: "14px",
-    padding: "14px 18px",
-    fontSize: "16px",
-    fontWeight: 700,
-    background: "#2563eb",
-    color: "#fff",
-    cursor: "pointer",
+    height: 58,
+    borderRadius: 18,
+    fontSize: 18,
+    fontWeight: 800,
+    boxShadow:
+      "0 14px 32px rgba(58,110,255,0.25)",
   },
-  secondaryButton: {
-    border: "none",
-    background: "#1e293b",
-    color: "#fff",
-    padding: "10px 14px",
-    borderRadius: "10px",
-    cursor: "pointer",
-    fontWeight: 600,
-  },
-  error: {
-    marginTop: "12px",
-    padding: "12px 14px",
-    borderRadius: "12px",
-    background: "#fef2f2",
-    color: "#b91c1c",
-    border: "1px solid #fecaca",
-  },
-  status: {
-    marginTop: "12px",
-    padding: "12px 14px",
-    borderRadius: "12px",
-    background: "#eff6ff",
-    color: "#1d4ed8",
-    border: "1px solid #bfdbfe",
-  },
-  statusOk: {
-    marginTop: "12px",
-    padding: "12px 14px",
-    borderRadius: "12px",
+
+  successBox: {
+    marginBottom: 18,
+    padding: "14px 16px",
+    borderRadius: 16,
     background: "#ecfdf5",
     color: "#047857",
     border: "1px solid #a7f3d0",
+    fontWeight: 600,
   },
-  iupStatusBox: {
-    marginTop: "16px",
+
+  errorBox: {
+    marginBottom: 18,
     padding: "14px 16px",
+    borderRadius: 16,
+    background: "#fef2f2",
+    color: "#b91c1c",
+    border: "1px solid #fecaca",
+    fontWeight: 600,
+  },
+
+  empty: {
+    padding: "28px",
+    textAlign: "center",
+    color: "#7c8aa5",
+    fontWeight: 500,
+  },
+
+  iupBox: {
+    marginBottom: 20,
+    padding: "18px",
     border: "1px solid #c7d2fe",
     background: "#eef2ff",
-    borderRadius: "12px",
+    borderRadius: 20,
   },
-  iupStatusTop: {
+
+  iupTop: {
     display: "flex",
-    alignItems: "center",
     justifyContent: "space-between",
-    color: "#1e293b",
+    alignItems: "center",
+    marginBottom: 10,
+    color: "#17356f",
   },
+
   iupCounter: {
-    background: "#1e293b",
+    background: "#17356f",
     color: "#fff",
-    padding: "2px 10px",
-    borderRadius: "999px",
-    fontSize: "13px",
+    padding: "6px 12px",
+    borderRadius: 999,
     fontWeight: 700,
+    fontSize: 13,
   },
-  iupHint: {
-    margin: "6px 0 10px",
-    color: "#475569",
-    fontSize: "13px",
+
+  iupText: {
+    color: "#556987",
+    marginBottom: 14,
   },
+
   iupList: {
     display: "flex",
     flexDirection: "column",
-    gap: "4px",
-    maxHeight: "180px",
-    overflowY: "auto",
+    gap: 8,
   },
+
   iupRow: {
+    background: "#fff",
+    borderRadius: 12,
+    padding: "10px 12px",
     display: "flex",
     alignItems: "center",
-    gap: "10px",
-    padding: "4px 8px",
-    background: "#fff",
-    borderRadius: "8px",
-    fontSize: "13px",
+    gap: 10,
   },
+
   iupBadge: {
-    padding: "1px 8px",
-    borderRadius: "8px",
-    fontSize: "11px",
+    padding: "4px 10px",
+    borderRadius: 999,
     fontWeight: 700,
-    textTransform: "uppercase",
+    fontSize: 12,
   },
 };
