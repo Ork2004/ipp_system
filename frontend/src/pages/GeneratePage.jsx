@@ -1,18 +1,7 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../api";
-
-function fmtDateTime(v) {
-  if (!v) return "";
-  try {
-    return new Date(v).toLocaleString();
-  } catch {
-    return String(v);
-  }
-}
-
-function getApiBaseUrl() {
-  return (api.defaults.baseURL || "http://127.0.0.1:8000").replace(/\/$/, "");
-}
+import { api, getApiBaseUrl } from "../api";
+import { fmtDateTime } from "../utils/date";
 
 const selectStyle = {
   width: 220,
@@ -92,8 +81,8 @@ export default function GeneratePage() {
     );
   }, [rawTemplates, academicYear]);
 
-  async function loadTeachers(depId, currentTeacherId = 0) {
-    if (role !== "admin" || !depId) return;
+  async function loadTeachers(depId, currentTeacherId = 0, currentRole = "guest") {
+    if (currentRole !== "admin" || !depId) return;
 
     try {
       const res = await api.get("/teachers", {
@@ -142,22 +131,18 @@ export default function GeneratePage() {
     }
   }
 
-  async function loadHistory(selectedTeacherId = teacherId) {
+  async function loadHistory() {
     try {
-      setHistStatus("Загрузка истории...");
+      setHistStatus("Загрузка файлов...");
 
-      const params = { limit: 50, offset: 0 };
-
-      if (role === "admin" && selectedTeacherId) {
-        params.teacher_id = Number(selectedTeacherId);
-      }
+      const params = { limit: 500, offset: 0 };
 
       const res = await api.get("/history", { params });
       setHist(Array.isArray(res.data) ? res.data : []);
       setHistStatus("");
     } catch (e) {
       console.error(e);
-      setHistStatus(e?.response?.data?.detail || "Ошибка истории");
+      setHistStatus(e?.response?.data?.detail || "Ошибка списка файлов");
       setHist([]);
     }
   }
@@ -210,13 +195,13 @@ export default function GeneratePage() {
 
       setStatus("Готово");
       setDownloadUrl(res.data.download_url || "");
-      await loadHistory(role === "admin" ? teacherId : 0);
+      await loadHistory();
     } catch (e) {
       console.error(e);
       setStatus(
         `Ошибка ❌ ${e?.response?.data?.detail || "проверь настройки/шаблоны"}`
       );
-      await loadHistory(role === "admin" ? teacherId : 0);
+      await loadHistory();
     }
   }
 
@@ -232,13 +217,13 @@ export default function GeneratePage() {
     if (!dep) return;
 
     loadYearLists(dep);
-    loadTeachers(dep, savedTeacherId);
-    loadHistory(savedTeacherId);
+    loadTeachers(dep, savedTeacherId, role);
+    loadHistory();
 
     const refresh = () => {
       loadYearLists(dep);
-      loadTeachers(dep, Number(localStorage.getItem("teacher_id") || 0));
-      loadHistory(Number(localStorage.getItem("teacher_id") || 0));
+      loadTeachers(dep, Number(localStorage.getItem("teacher_id") || 0), role);
+      loadHistory();
     };
 
     window.addEventListener("focus", refresh);
@@ -255,7 +240,7 @@ export default function GeneratePage() {
 
   useEffect(() => {
     if (role === "admin") {
-      loadHistory(teacherId);
+      loadHistory();
     }
   }, [teacherId, role]);
 
@@ -441,7 +426,7 @@ export default function GeneratePage() {
             letterSpacing: "-0.02em",
           }}
         >
-          История генерации
+          Сгенерированные файлы
         </div>
 
         <div
@@ -467,7 +452,7 @@ export default function GeneratePage() {
           <table
             className="table"
             style={{
-              minWidth: 980,
+              minWidth: 1120,
               margin: 0,
             }}
           >
@@ -483,7 +468,19 @@ export default function GeneratePage() {
                     padding: "18px 16px",
                   }}
                 >
-                  Статус
+                  Год
+                </th>
+                <th
+                  style={{
+                    width: 260,
+                    background: "#f7faff",
+                    color: "#5f7195",
+                    fontWeight: 800,
+                    fontSize: 14,
+                    padding: "18px 16px",
+                  }}
+                >
+                  Преподаватель
                 </th>
                 <th
                   style={{
@@ -506,11 +503,11 @@ export default function GeneratePage() {
                     padding: "18px 16px",
                   }}
                 >
-                  Дата
+                  Последняя генерация
                 </th>
                 <th
                   style={{
-                    width: 180,
+                    width: 220,
                     background: "#f7faff",
                     color: "#5f7195",
                     fontWeight: 800,
@@ -518,7 +515,7 @@ export default function GeneratePage() {
                     padding: "18px 16px",
                   }}
                 >
-                  Кто
+                  Кто сгенерировал
                 </th>
                 <th
                   style={{
@@ -539,7 +536,7 @@ export default function GeneratePage() {
               {!hist.length ? (
                 <tr>
                   <td
-                    colSpan="5"
+                    colSpan="6"
                     style={{
                       textAlign: "center",
                       padding: "28px 16px",
@@ -555,6 +552,18 @@ export default function GeneratePage() {
                   const link = h.output_path
                     ? makeDownloadLinkFromPath(h.output_path)
                     : "";
+                  const generatedBy =
+                    h.last_generated_by_display_name ||
+                    h.generated_by_display_name ||
+                    h.last_generated_by_username ||
+                    h.generated_by_username ||
+                    (h.generated_by_role
+                      ? `${h.generated_by_role} #${
+                          h.generated_by_user_id || ""
+                        }`
+                      : "");
+                  const generatedAt =
+                    h.last_generated_at || h.updated_at || h.created_at;
 
                   return (
                     <tr key={h.id}>
@@ -562,15 +571,20 @@ export default function GeneratePage() {
                         style={{
                           padding: "18px 16px",
                           fontWeight: 800,
-                          color:
-                            h.status?.toLowerCase().includes("ok") ||
-                            h.status?.toLowerCase().includes("done") ||
-                            h.status?.toLowerCase().includes("success")
-                              ? "#1f8f57"
-                              : "#17356f",
+                          color: "#17356f",
                         }}
                       >
-                        {h.status}
+                        {h.academic_year || ""}
+                      </td>
+
+                      <td
+                        style={{
+                          padding: "18px 16px",
+                          color: "#1f2f4d",
+                          fontWeight: 500,
+                        }}
+                      >
+                        {h.teacher_name || ""}
                       </td>
 
                       <td
@@ -589,7 +603,7 @@ export default function GeneratePage() {
                           color: "#556987",
                         }}
                       >
-                        {fmtDateTime(h.created_at)}
+                        {fmtDateTime(generatedAt)}
                       </td>
 
                       <td
@@ -599,11 +613,7 @@ export default function GeneratePage() {
                           fontWeight: 500,
                         }}
                       >
-                        {h.generated_by_role
-                          ? `${h.generated_by_role} #${
-                              h.generated_by_user_id || ""
-                            }`
-                          : ""}
+                        {generatedBy}
                       </td>
 
                       <td

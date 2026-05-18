@@ -1,25 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-
-function fmtDateTime(v) {
-  if (!v) return "";
-  try {
-    return new Date(v).toLocaleString();
-  } catch {
-    return String(v);
-  }
-}
-
-function downloadBlob(blob, filename) {
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename || "file";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.URL.revokeObjectURL(url);
-}
+import { fmtDateTime } from "../utils/date";
+import { downloadBlob } from "../utils/download";
 
 const yearInputStyle = {
   width: 220,
