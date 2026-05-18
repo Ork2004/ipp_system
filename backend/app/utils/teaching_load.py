@@ -1,11 +1,13 @@
 import re
 from collections import defaultdict
+from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
 SEM_RE = re.compile(r"(?:(\d+)\s*(?:сем|semestr|semester))", re.IGNORECASE)
 SCOPE_RE = re.compile(r"(\d+(?:\s*,\s*\d+)*)")
 COURSE_IN_OP_RE = re.compile(r"(\d+)\s*курс", re.IGNORECASE)
+YEAR_RANGE_IN_OP_RE = re.compile(r"(20\d{2})\s*[-–—]\s*(20\d{2})")
 WORKLOAD_VALUE_FIELDS = (
     "l",
     "spz",
@@ -229,10 +231,165 @@ def get_teaching_load_summary_binding(settings_cfg: Dict[str, Any]) -> Dict[str,
     return _binding_payload(template_bindings.get("teaching_load_summary"))
 
 
+def get_performance_summary_binding(settings_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    template_bindings = (settings_cfg or {}).get("template_bindings") or {}
+    binding = _binding_payload(template_bindings.get("performance_summary"))
+    if binding:
+        return binding
+    return _binding_payload(template_bindings.get("individual_plan_performance"))
+
+
 def extract_excel_bound_raw_table_ids(settings_cfg: Dict[str, Any]) -> set[int]:
+    return extract_excel_bound_raw_table_ids_with_raw_tables(settings_cfg, raw_tables=None)
+
+
+def _raw_tables_iterable(raw_tables: Any) -> List[Dict[str, Any]]:
+    if isinstance(raw_tables, dict):
+        return list(raw_tables.values())
+    if isinstance(raw_tables, list):
+        return list(raw_tables)
+    if isinstance(raw_tables, tuple):
+        return list(raw_tables)
+    return []
+
+
+def is_teaching_load_detail_raw_table(raw_table: Dict[str, Any]) -> bool:
+    hints = [_normalize_text_lower(value) for value in (raw_table.get("column_hints") or [])]
+    if len(hints) < 10:
+        return False
+
+    has_semester = any("семестр" in hint or "semester" in hint for hint in hints[:2])
+    has_subject = any(
+        any(token in hint for token in ("наименование", "subject", "пән", "discipline"))
+        for hint in hints
+    )
+    has_group = any("груп" in hint or "group" in hint for hint in hints)
+    load_markers = (
+        "лек",
+        "практ",
+        "лаб",
+        "срсп",
+        "сроп",
+        "рубеж",
+        "экзам",
+        "практика",
+        "нир",
+        "дп",
+        "ддр",
+        "друг",
+        "итого",
+        "hours",
+    )
+    load_hint_matches = sum(
+        1
+        for hint in hints
+        if any(marker in hint for marker in load_markers)
+    )
+
+    return has_semester and has_subject and has_group and load_hint_matches >= 5
+
+
+def infer_teaching_load_bindings(raw_tables: Any) -> Dict[str, Dict[str, Any]]:
+    table_items = sorted(
+        _raw_tables_iterable(raw_tables),
+        key=lambda item: int(item.get("table_index") or 0),
+    )
+    detail_tables = [item for item in table_items if is_teaching_load_detail_raw_table(item)]
+    summary_tables = [item for item in table_items if is_teaching_load_summary_raw_table(item)]
+
+    out: Dict[str, Dict[str, Any]] = {}
+    if detail_tables:
+        out["staff"] = {"source": "excel", "raw_table_id": int(detail_tables[0]["id"])}
+    if len(detail_tables) > 1:
+        out["hourly"] = {"source": "excel", "raw_table_id": int(detail_tables[1]["id"])}
+    if summary_tables:
+        out["summary"] = {"source": "excel", "raw_table_id": int(summary_tables[0]["id"])}
+    return out
+
+
+def is_performance_summary_raw_table(raw_table: Dict[str, Any]) -> bool:
+    hints = " ".join(_normalize_text(value) for value in (raw_table.get("column_hints") or []))
+    structure_meta = raw_table.get("structure_meta") or {}
+    text = _normalize_text_lower(
+        " ".join(
+            [
+                raw_table.get("section_title") or "",
+                raw_table.get("header_signature") or "",
+                hints,
+                structure_meta.get("section_title_norm") or "",
+                structure_meta.get("header_signature_norm") or "",
+            ]
+        )
+    )
+    if not text:
+        return False
+
+    return any(
+        marker in text
+        for marker in (
+            "оқытушының джж орындау қорытындысы",
+            "джж орындау қорытындысы",
+            "итоги выполнения ип работы преподавателя",
+            "teacher’s individual plan performance",
+            "teacher's individual plan performance",
+            "individual plan performance",
+        )
+    )
+
+
+def infer_performance_summary_binding(raw_tables: Any) -> Dict[str, Any]:
+    table_items = sorted(
+        _raw_tables_iterable(raw_tables),
+        key=lambda item: int(item.get("table_index") or 0),
+    )
+    for item in table_items:
+        if is_performance_summary_raw_table(item):
+            return {"source": "excel", "raw_table_id": int(item["id"])}
+    return {}
+
+
+def build_effective_generation_settings(
+    settings_cfg: Dict[str, Any],
+    raw_tables: Any,
+) -> Dict[str, Any]:
+    effective = deepcopy(settings_cfg or {})
+    inferred = infer_teaching_load_bindings(raw_tables)
+    template_bindings = deepcopy((effective.get("template_bindings") or {}))
+    teaching_load_cfg = deepcopy((template_bindings.get("teaching_load") or {}))
+
+    for load_kind in ("staff", "hourly"):
+        existing_binding = _binding_payload(teaching_load_cfg.get(load_kind))
+        if not existing_binding and inferred.get(load_kind):
+            teaching_load_cfg[load_kind] = inferred[load_kind]
+
+    existing_summary_binding = _binding_payload(teaching_load_cfg.get("summary"))
+    legacy_summary_binding = _binding_payload(template_bindings.get("teaching_load_summary"))
+    if not existing_summary_binding and not legacy_summary_binding and inferred.get("summary"):
+        teaching_load_cfg["summary"] = inferred["summary"]
+
+    if teaching_load_cfg:
+        template_bindings["teaching_load"] = teaching_load_cfg
+
+    existing_performance_binding = get_performance_summary_binding(effective)
+    if not existing_performance_binding:
+        inferred_performance_binding = infer_performance_summary_binding(raw_tables)
+        if inferred_performance_binding:
+            template_bindings["performance_summary"] = inferred_performance_binding
+
+    if template_bindings:
+        effective["template_bindings"] = template_bindings
+
+    return effective
+
+
+def extract_excel_bound_raw_table_ids_with_raw_tables(
+    settings_cfg: Dict[str, Any],
+    raw_tables: Any,
+) -> set[int]:
+    effective_settings = build_effective_generation_settings(settings_cfg, raw_tables)
     out: set[int] = set()
     for load_kind in ("staff", "hourly"):
-        binding = get_teaching_load_binding(settings_cfg, load_kind)
+        binding = get_teaching_load_binding(effective_settings, load_kind)
         raw_table_id = binding.get("raw_table_id")
         if not is_excel_source_binding(binding):
             continue
@@ -242,9 +399,19 @@ def extract_excel_bound_raw_table_ids(settings_cfg: Dict[str, Any]) -> set[int]:
             except Exception:
                 continue
 
-    summary_binding = get_teaching_load_summary_binding(settings_cfg)
+    summary_binding = get_teaching_load_summary_binding(effective_settings)
     raw_table_id = summary_binding.get("raw_table_id")
     if not is_excel_source_binding(summary_binding):
+        raw_table_id = None
+    if raw_table_id:
+        try:
+            out.add(int(raw_table_id))
+        except Exception:
+            pass
+
+    performance_binding = get_performance_summary_binding(effective_settings)
+    raw_table_id = performance_binding.get("raw_table_id")
+    if not is_excel_source_binding(performance_binding):
         raw_table_id = None
     if raw_table_id:
         try:
@@ -452,14 +619,31 @@ def _parse_academic_year_start(academic_year: str) -> Optional[int]:
         return None
 
 
-def _derive_course_from_op(value: Any) -> str:
+def _derive_course_from_op(value: Any, academic_year: str = "") -> str:
     text = _normalize_text(value)
     if not text:
         return ""
+
     matches = [int(x) for x in COURSE_IN_OP_RE.findall(text)]
-    if not matches:
+    if matches:
+        return str(max(matches))
+
+    current_year = _parse_academic_year_start(academic_year)
+    if current_year is None:
         return ""
-    return str(max(matches))
+
+    range_courses: List[int] = []
+    for start_year, _ in YEAR_RANGE_IN_OP_RE.findall(text):
+        try:
+            course = current_year - int(start_year) + 1
+        except Exception:
+            continue
+        if course > 0:
+            range_courses.append(course)
+
+    if not range_courses:
+        return ""
+    return str(max(range_courses))
 
 
 def _derive_course_from_group(value: Any, academic_year: str) -> str:
@@ -499,7 +683,7 @@ def _derive_course(group_value: Any, op_value: Any, academic_year: str) -> str:
     from_group = _derive_course_from_group(group_value, academic_year)
     if from_group:
         return from_group
-    return _derive_course_from_op(op_value)
+    return _derive_course_from_op(op_value, academic_year)
 
 
 def _matches_patterns(value: Any, patterns: List[str]) -> bool:
@@ -642,6 +826,11 @@ def _build_normalized_row(
     activity_group = _detect_activity_group(activity_value, settings_cfg)
     group_value = _lookup_value(raw_row, resolved_columns, "group_col")
     op_value = _lookup_value(raw_row, resolved_columns, "op_col")
+    total_candidate = max(
+        _to_num(_lookup_value(raw_row, resolved_columns, "total_col")),
+        _to_num(_lookup_value(raw_row, resolved_columns, "normative_col")),
+    )
+    special_bucket = _detect_special_bucket(raw_row, resolved_columns, settings_cfg)
 
     out: Dict[str, Any] = {
         "_raw": raw_row,
@@ -650,16 +839,14 @@ def _build_normalized_row(
         "_scope_key": _scope_key(scope),
         "_load_kind": load_kind,
         "_activity_group": activity_group,
+        "_special_bucket": special_bucket,
         "discipline": _coalesce(_lookup_value(raw_row, resolved_columns, "discipline_col")),
         "op": _coalesce(op_value),
         "group": _coalesce(group_value),
-        "course": _coalesce(
-            _lookup_value(raw_row, resolved_columns, "course_col"),
-            _derive_course(group_value, op_value, academic_year),
-        ),
-        "academic_period": _compute_academic_period(raw_row, resolved_columns, scope),
-        "credits": _compute_credits(raw_row, resolved_columns, scope, semester_values),
-        "student_count": _coalesce(_lookup_value(raw_row, resolved_columns, "student_count_col")),
+        "course": "",
+        "academic_period": "",
+        "credits": "",
+        "student_count": "",
         "activity_type": _coalesce(activity_value),
         "payment_form": _coalesce(_lookup_value(raw_row, resolved_columns, "payment_form_col")),
     }
@@ -679,17 +866,27 @@ def _build_normalized_row(
     _assign_direct_hours(numeric_values, raw_row, resolved_columns)
 
     has_direct_workload = any(value > 0 for value in numeric_values.values())
-    total_candidate = max(
-        _to_num(_lookup_value(raw_row, resolved_columns, "total_col")),
-        _to_num(_lookup_value(raw_row, resolved_columns, "normative_col")),
-    )
 
     if not has_direct_workload:
         if activity_group in ("lecture", "lab_practice"):
             pass
         elif total_candidate > 0:
-            bucket = _detect_special_bucket(raw_row, resolved_columns, settings_cfg)
-            numeric_values[bucket] = total_candidate
+            numeric_values[special_bucket] = total_candidate
+
+    has_class_workload = any(
+        numeric_values[field_key] > 0
+        for field_key in ("l", "spz", "lz", "srsp", "rk_1_2", "ekzameny")
+    )
+    preserve_study_attrs = has_class_workload or activity_group in ("lecture", "lab_practice")
+
+    if preserve_study_attrs:
+        out["course"] = _coalesce(
+            _lookup_value(raw_row, resolved_columns, "course_col"),
+            _derive_course(group_value, op_value, academic_year),
+        )
+        out["academic_period"] = _compute_academic_period(raw_row, resolved_columns, scope)
+        out["credits"] = _compute_credits(raw_row, resolved_columns, scope, semester_values)
+        out["student_count"] = _coalesce(_lookup_value(raw_row, resolved_columns, "student_count_col"))
 
     out.update(numeric_values)
     out["itogo"] = sum(
@@ -736,13 +933,7 @@ def _merge_workload_rows(rows: List[Dict[str, Any]], settings_cfg: Dict[str, Any
         return []
 
     merge_rules = (settings_cfg or {}).get("merge_rules") or {}
-    key_cols = merge_rules.get("key_cols") or [
-        "discipline",
-        "op",
-        "course",
-        "academic_period",
-        "credits",
-    ]
+    key_cols = merge_rules.get("key_cols") or ["discipline", "op", "credits"]
     sum_cols_by_type = merge_rules.get("sum_cols_by_type") or DEFAULT_SUM_COLS_BY_TYPE
     group_priority_type = _normalize_text(merge_rules.get("group_priority_type"))
     group_join = merge_rules.get("group_join") or ", "

@@ -2,6 +2,81 @@ import re
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
+SNAPSHOT_COLUMNS = [
+    "id",
+    "teacher_id",
+    "academic_year",
+    "raw_template_id",
+    "raw_table_id",
+    "department_id",
+    "section_title",
+    "table_type",
+    "header_signature",
+    "column_hints",
+    "table_fingerprint",
+    "stable_section_key",
+    "stable_structure_key",
+    "stable_table_key",
+    "stable_column_keys",
+    "source_mode",
+    "prefilled_from_snapshot_id",
+    "created_at",
+    "updated_at",
+]
+
+STATIC_CELL_COLUMNS = [
+    "id",
+    "snapshot_id",
+    "raw_cell_id",
+    "row_index",
+    "col_index",
+    "cell_key",
+    "semantic_key",
+    "stable_cell_key",
+    "stable_column_key",
+    "row_signature",
+    "column_hint_text",
+    "value_text",
+    "created_at",
+    "updated_at",
+]
+
+LOOP_ROW_COLUMNS = [
+    "id",
+    "snapshot_id",
+    "row_order",
+    "created_at",
+    "updated_at",
+]
+
+LOOP_CELL_COLUMNS = [
+    "id",
+    "loop_row_id",
+    "col_index",
+    "column_hint_text",
+    "semantic_key",
+    "stable_column_key",
+    "value_text",
+    "created_at",
+    "updated_at",
+]
+
+
+def _row_to_dict(row: Any, columns: List[str]) -> Dict[str, Any]:
+    if row is None:
+        return {}
+
+    if isinstance(row, dict):
+        return {col: row.get(col) for col in columns}
+
+    if hasattr(row, "keys"):
+        return {col: row[col] for col in columns}
+
+    return {
+        col: row[idx] if idx < len(row) else None
+        for idx, col in enumerate(columns)
+    }
+
 
 def _norm(x: Any) -> str:
     if x is None:
@@ -71,8 +146,17 @@ def _column_hints_overlap_score(current_hints: List[str], prev_hints: List[str])
 def calc_snapshot_match_score(current_table: Dict[str, Any], prev_snapshot: Dict[str, Any]) -> float:
     score = 0.0
 
+    if _norm(current_table.get("stable_table_key")) == _norm(prev_snapshot.get("stable_table_key")):
+        score += 120.0
+
     if _norm(current_table.get("table_fingerprint")) == _norm(prev_snapshot.get("table_fingerprint")):
         score += 100.0
+
+    if _norm(current_table.get("stable_structure_key")) == _norm(prev_snapshot.get("stable_structure_key")):
+        score += 60.0
+
+    if _norm(current_table.get("stable_section_key")) == _norm(prev_snapshot.get("stable_section_key")):
+        score += 35.0
 
     if _norm(current_table.get("table_type")) == _norm(prev_snapshot.get("table_type")):
         score += 20.0
@@ -92,14 +176,26 @@ def _build_static_col_mapping(
     prev_cells: List[Dict[str, Any]],
 ) -> Dict[Tuple[int, int], Dict[str, Any]]:
 
+    prev_by_stable_cell: Dict[str, Dict[str, Any]] = {}
+    prev_by_semantic: Dict[str, Dict[str, Any]] = {}
     prev_by_signature: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    prev_by_row_col_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
     prev_by_pos: Dict[Tuple[int, int], Dict[str, Any]] = {}
 
     for cell in prev_cells:
+        stable_cell_key = _norm(cell.get("stable_cell_key"))
+        semantic_key = _norm(cell.get("semantic_key"))
         row_sig = _norm(cell.get("row_signature"))
+        stable_column_key = _norm(cell.get("stable_column_key"))
         col_hint = _norm(cell.get("column_hint_text"))
+        if stable_cell_key:
+            prev_by_stable_cell[stable_cell_key] = cell
+        if semantic_key:
+            prev_by_semantic[semantic_key] = cell
         if row_sig or col_hint:
             prev_by_signature[(row_sig, col_hint)] = cell
+        if row_sig or stable_column_key:
+            prev_by_row_col_key[(row_sig, stable_column_key)] = cell
         prev_by_pos[(int(cell.get("row_index", 0)), int(cell.get("col_index", 0)))] = cell
 
     mapping: Dict[Tuple[int, int], Dict[str, Any]] = {}
@@ -111,12 +207,21 @@ def _build_static_col_mapping(
 
             cur_row = int(cell.get("row_index", 0))
             cur_col = int(cell.get("col_index", 0))
+            stable_cell_key = _norm(cell.get("stable_cell_key"))
+            semantic_key = _norm(cell.get("semantic_key"))
             row_sig = _norm(cell.get("row_signature"))
+            stable_column_key = _norm(cell.get("stable_column_key"))
             col_hint = _norm(cell.get("column_hint_text"))
 
             found = None
 
-            if (row_sig, col_hint) in prev_by_signature:
+            if stable_cell_key and stable_cell_key in prev_by_stable_cell:
+                found = prev_by_stable_cell[stable_cell_key]
+            elif semantic_key and semantic_key in prev_by_semantic:
+                found = prev_by_semantic[semantic_key]
+            elif (row_sig, stable_column_key) in prev_by_row_col_key:
+                found = prev_by_row_col_key[(row_sig, stable_column_key)]
+            elif (row_sig, col_hint) in prev_by_signature:
                 found = prev_by_signature[(row_sig, col_hint)]
             elif (cur_row, cur_col) in prev_by_pos:
                 found = prev_by_pos[(cur_row, cur_col)]
@@ -130,9 +235,13 @@ def _build_static_col_mapping(
 def _build_loop_column_index_map(
     current_hints: List[str],
     prev_hints: List[str],
+    current_keys: Optional[List[str]] = None,
+    prev_keys: Optional[List[str]] = None,
 ) -> Dict[int, int]:
     current_norm = [_norm(x) for x in (current_hints or [])]
     prev_norm = [_norm(x) for x in (prev_hints or [])]
+    current_key_norm = [_norm(x) for x in (current_keys or [])]
+    prev_key_norm = [_norm(x) for x in (prev_keys or [])]
 
     out: Dict[int, int] = {}
     used_prev = set()
@@ -140,6 +249,21 @@ def _build_loop_column_index_map(
     for cur_idx, cur_hint in enumerate(current_norm):
         best_prev_idx = None
         best_score = 0.0
+
+        cur_key = current_key_norm[cur_idx] if cur_idx < len(current_key_norm) else ""
+        if cur_key:
+            for prev_idx, prev_key in enumerate(prev_key_norm):
+                if prev_idx in used_prev:
+                    continue
+                if cur_key == prev_key:
+                    best_prev_idx = prev_idx
+                    best_score = 1.0
+                    break
+
+        if best_prev_idx is not None:
+            used_prev.add(best_prev_idx)
+            out[cur_idx] = best_prev_idx
+            continue
 
         for prev_idx, prev_hint in enumerate(prev_norm):
             if prev_idx in used_prev:
@@ -184,6 +308,10 @@ def find_best_previous_snapshot(
             header_signature,
             column_hints,
             table_fingerprint,
+            stable_section_key,
+            stable_structure_key,
+            stable_table_key,
+            stable_column_keys,
             source_mode,
             prefilled_from_snapshot_id,
             created_at,
@@ -195,7 +323,10 @@ def find_best_previous_snapshot(
         """,
         (teacher_id, prev_year),
     )
-    candidates = cur.fetchall() or []
+    candidates = [
+        _row_to_dict(row, SNAPSHOT_COLUMNS)
+        for row in (cur.fetchall() or [])
+    ]
 
     best = None
     best_score = -1.0
@@ -225,6 +356,8 @@ def load_previous_static_cells(cur, snapshot_id: int) -> List[Dict[str, Any]]:
             col_index,
             cell_key,
             semantic_key,
+            stable_cell_key,
+            stable_column_key,
             row_signature,
             column_hint_text,
             value_text,
@@ -236,7 +369,10 @@ def load_previous_static_cells(cur, snapshot_id: int) -> List[Dict[str, Any]]:
         """,
         (snapshot_id,),
     )
-    return cur.fetchall() or []
+    return [
+        _row_to_dict(row, STATIC_CELL_COLUMNS)
+        for row in (cur.fetchall() or [])
+    ]
 
 
 def load_previous_loop_rows(cur, snapshot_id: int) -> List[Dict[str, Any]]:
@@ -254,7 +390,10 @@ def load_previous_loop_rows(cur, snapshot_id: int) -> List[Dict[str, Any]]:
         """,
         (snapshot_id,),
     )
-    rows = cur.fetchall() or []
+    rows = [
+        _row_to_dict(row, LOOP_ROW_COLUMNS)
+        for row in (cur.fetchall() or [])
+    ]
 
     out: List[Dict[str, Any]] = []
 
@@ -267,6 +406,7 @@ def load_previous_loop_rows(cur, snapshot_id: int) -> List[Dict[str, Any]]:
                 col_index,
                 column_hint_text,
                 semantic_key,
+                stable_column_key,
                 value_text,
                 created_at,
                 updated_at
@@ -276,7 +416,10 @@ def load_previous_loop_rows(cur, snapshot_id: int) -> List[Dict[str, Any]]:
             """,
             (row["id"],),
         )
-        cells = cur.fetchall() or []
+        cells = [
+            _row_to_dict(cell, LOOP_CELL_COLUMNS)
+            for cell in (cur.fetchall() or [])
+        ]
 
         out.append({
             "id": row["id"],
@@ -315,6 +458,8 @@ def build_prefill_for_static_table(
                 "col_index": cur_col,
                 "cell_key": cell.get("cell_key"),
                 "semantic_key": cell.get("semantic_key"),
+                "stable_cell_key": cell.get("stable_cell_key"),
+                "stable_column_key": cell.get("stable_column_key"),
                 "row_signature": cell.get("row_signature"),
                 "column_hint_text": cell.get("column_hint_text"),
                 "value": matched_prev.get("value_text", "") or "",
@@ -333,8 +478,10 @@ def build_prefill_for_loop_table(
 ) -> List[Dict[str, Any]]:
     current_hints = current_table.get("column_hints") or []
     prev_hints = prev_snapshot.get("column_hints") or []
+    current_keys = current_table.get("stable_column_keys") or []
+    prev_keys = prev_snapshot.get("stable_column_keys") or []
 
-    col_map = _build_loop_column_index_map(current_hints, prev_hints)
+    col_map = _build_loop_column_index_map(current_hints, prev_hints, current_keys, prev_keys)
 
     if not col_map:
         return []
@@ -357,6 +504,11 @@ def build_prefill_for_loop_table(
                     current_hints[current_col_index]
                     if current_col_index < len(current_hints)
                     else f"Колонка {current_col_index + 1}"
+                ),
+                "stable_column_key": (
+                    current_keys[current_col_index]
+                    if current_col_index < len(current_keys)
+                    else None
                 ),
                 "value": prev_by_col.get(prev_col_index, ""),
             })

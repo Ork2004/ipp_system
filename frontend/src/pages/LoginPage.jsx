@@ -47,8 +47,7 @@ export default function LoginPage() {
         localStorage.setItem("department_id", String(payload.department_id));
       }
 
-      if (role === "admin") nav("/settings");
-      else nav("/generate");
+      nav("/home");
     } catch (err) {
       const msg = err?.response?.data?.detail || err?.message || "Ошибка входа";
       setError(String(msg));

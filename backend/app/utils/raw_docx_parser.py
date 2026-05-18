@@ -3,6 +3,9 @@ import re
 from typing import Any, Dict, List, Optional
 
 from docx import Document
+from docx.oxml.table import CT_Tbl
+from docx.oxml.text.paragraph import CT_P
+from docx.text.paragraph import Paragraph
 
 
 SECTION_HEADING_RE = re.compile(
@@ -26,6 +29,68 @@ def _normalize_text(value: Any) -> str:
 
 def _normalize_text_lower(value: Any) -> str:
     return _normalize_text(value).lower()
+
+
+def _identity_text(value: Any) -> str:
+    text = _normalize_text_lower(value)
+    if not text:
+        return ""
+    text = re.sub(r"\b20\d{2}\s*[-/]\s*20\d{2}\b", "year_range", text)
+    text = re.sub(r"\d+", "#", text)
+    text = re.sub(r"[^\w]+", " ", text, flags=re.UNICODE)
+    return _normalize_text(text)
+
+
+def _section_identity_text(value: Any) -> str:
+    text = _normalize_text_lower(value)
+    text = re.sub(r"^\s*(?:\d+(?:\.\d+)*|[ivxlc]+)[\).\s-]+", "", text, flags=re.IGNORECASE)
+    return _identity_text(text) or "__untitled_section__"
+
+
+def _hash_key(prefix: str, *parts: Any) -> str:
+    normalized_parts = []
+    for part in parts:
+        if isinstance(part, (list, tuple)):
+            normalized_parts.append(" | ".join(_identity_text(x) for x in part))
+        else:
+            normalized_parts.append(_identity_text(part))
+    base = "\n".join(normalized_parts)
+    return f"{prefix}_{hashlib.sha1(base.encode('utf-8')).hexdigest()}"
+
+
+def _build_stable_section_key(section_title: str) -> str:
+    return _hash_key("sec", _section_identity_text(section_title))
+
+
+def _build_stable_structure_key(
+    *,
+    table_type: str,
+    header_signature: str,
+    column_hints: List[str],
+    col_count: int,
+) -> str:
+    return _hash_key("struct", header_signature, column_hints, str(col_count))
+
+
+def _build_stable_table_key(
+    *,
+    stable_section_key: str,
+    stable_structure_key: str,
+    table_type: str,
+) -> str:
+    return _hash_key("table", stable_section_key, stable_structure_key)
+
+
+def _build_stable_column_keys(column_hints: List[str]) -> List[str]:
+    seen: Dict[str, int] = {}
+    out: List[str] = []
+
+    for idx, hint in enumerate(column_hints or []):
+        identity = _identity_text(hint) or f"column_{idx + 1}"
+        seen[identity] = seen.get(identity, 0) + 1
+        out.append(_hash_key("col", identity, str(seen[identity])))
+
+    return out
 
 
 def _is_empty_text(value: Any) -> bool:
@@ -134,19 +199,51 @@ def _extract_paragraphs_with_order(doc: Document) -> List[dict]:
     return out
 
 
+def _leading_section_number(text: Any) -> Optional[int]:
+    match = re.match(r"^\s*(\d+)", _normalize_text(text))
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except Exception:
+        return None
+
+
+def _best_recent_section_title(recent_paragraphs: List[str], table_index: int) -> str:
+    if not recent_paragraphs:
+        return f"Таблица {table_index + 1}"
+
+    last_text = recent_paragraphs[-1]
+    if len(recent_paragraphs) >= 2:
+        prev_text = recent_paragraphs[-2]
+        if _leading_section_number(prev_text) and not _leading_section_number(last_text) and len(last_text) < 140:
+            return f"{prev_text} {last_text}"
+
+    return last_text
+
+
+def _extract_table_section_titles(doc: Document) -> Dict[int, str]:
+    out: Dict[int, str] = {}
+    recent_paragraphs: List[str] = []
+    table_index = 0
+
+    for child in doc.element.body.iterchildren():
+        if isinstance(child, CT_P):
+            text = _normalize_text(Paragraph(child, doc).text)
+            if text:
+                recent_paragraphs.append(text)
+                recent_paragraphs = recent_paragraphs[-6:]
+            continue
+
+        if isinstance(child, CT_Tbl):
+            out[table_index] = _best_recent_section_title(recent_paragraphs, table_index)
+            table_index += 1
+
+    return out
+
+
 def _find_table_section_title(doc: Document, table_index: int) -> str:
-    section_title = ""
-    paragraphs = _extract_paragraphs_with_order(doc)
-
-    for p in paragraphs:
-        txt = p["text"]
-        if _is_section_heading(txt):
-            section_title = txt
-
-    if section_title:
-        return section_title
-
-    return f"Таблица {table_index + 1}"
+    return _extract_table_section_titles(doc).get(table_index, f"Таблица {table_index + 1}")
 
 
 def _guess_column_hint_text(matrix: List[List[dict]], col_index: int) -> str:
@@ -203,6 +300,10 @@ def _build_structure_meta(
     table_type: str,
     header_signature: str,
     column_hints: List[str],
+    stable_section_key: str,
+    stable_structure_key: str,
+    stable_table_key: str,
+    stable_column_keys: List[str],
     row_count: int,
     col_count: int,
     has_total_row: bool,
@@ -212,10 +313,31 @@ def _build_structure_meta(
         "table_type_norm": _normalize_text_lower(table_type),
         "header_signature_norm": _normalize_text_lower(header_signature),
         "column_hints_norm": [_normalize_text_lower(x) for x in (column_hints or [])],
+        "stable_section_key": stable_section_key,
+        "stable_structure_key": stable_structure_key,
+        "stable_table_key": stable_table_key,
+        "stable_column_keys": stable_column_keys or [],
         "row_count": row_count,
         "col_count": col_count,
         "has_total_row": bool(has_total_row),
     }
+
+
+def _build_row_signature(row: List[dict], row_index: int) -> str:
+    parts: List[str] = []
+
+    for cell in row or []:
+        text = _normalize_text(cell.get("text"))
+        if not text:
+            continue
+        if NUMBER_ONLY_RE.match(text):
+            continue
+        parts.append(_cell_signature(text))
+
+    if not parts:
+        return f"row_{row_index}"
+
+    return " | ".join(parts)
 
 
 def _extract_table_matrix(
@@ -225,6 +347,8 @@ def _extract_table_matrix(
     section_title: str,
     table_type: str,
     header_signature: str,
+    stable_table_key: str,
+    stable_column_keys: List[str],
 ) -> List[List[dict]]:
     matrix: List[List[dict]] = []
 
@@ -243,25 +367,30 @@ def _extract_table_matrix(
                 "editable": _is_empty_text(text),
                 "cell_key": f"t{table_index}_r{r_idx}_c{c_idx}",
                 "column_hint_text": column_hint_text,
-                "row_signature": f"r{r_idx}",
+                "row_signature": "",
                 "semantic_key": "",
+                "stable_cell_key": "",
+                "stable_column_key": "",
                 "cell_kind": "text",
             })
 
         matrix.append(row_cells)
 
     for r_idx, row in enumerate(matrix):
+        row_signature = _build_row_signature(row, r_idx)
         for c_idx, cell in enumerate(row):
             column_hint_text = _guess_column_hint_text(matrix, c_idx)
             cell["column_hint_text"] = column_hint_text
-            cell["semantic_key"] = _build_semantic_key(
-                section_title=section_title,
-                table_type=table_type,
-                header_signature=header_signature,
-                row_index=r_idx,
-                col_index=c_idx,
-                column_hint_text=column_hint_text,
+            cell["row_signature"] = row_signature
+            stable_column_key = (
+                stable_column_keys[c_idx]
+                if c_idx < len(stable_column_keys)
+                else _hash_key("col", column_hint_text or f"column_{c_idx + 1}", "1")
             )
+            stable_cell_key = _hash_key("cell", stable_table_key, row_signature, stable_column_key)
+            cell["stable_column_key"] = stable_column_key
+            cell["stable_cell_key"] = stable_cell_key
+            cell["semantic_key"] = stable_cell_key
 
     return matrix
 
@@ -276,6 +405,8 @@ def _collect_editable_cells(matrix: List[List[dict]]) -> List[dict]:
                     "col_index": cell["col_index"],
                     "cell_key": cell["cell_key"],
                     "semantic_key": cell.get("semantic_key"),
+                    "stable_cell_key": cell.get("stable_cell_key"),
+                    "stable_column_key": cell.get("stable_column_key"),
                     "row_signature": cell.get("row_signature"),
                     "column_hint_text": cell.get("column_hint_text"),
                 })
@@ -293,6 +424,8 @@ def _collect_prefilled_cells(matrix: List[List[dict]]) -> List[dict]:
                     "text": cell["text"],
                     "cell_key": cell["cell_key"],
                     "semantic_key": cell.get("semantic_key"),
+                    "stable_cell_key": cell.get("stable_cell_key"),
+                    "stable_column_key": cell.get("stable_column_key"),
                     "row_signature": cell.get("row_signature"),
                     "column_hint_text": cell.get("column_hint_text"),
                 })
@@ -325,12 +458,20 @@ def _extract_column_hints(matrix: List[List[dict]]) -> List[str]:
     return hints
 
 
+def _ensure_column_hints(column_hints: List[str], col_count: int) -> List[str]:
+    out = list(column_hints or [])
+    for idx in range(len(out), col_count):
+        out.append(f"Колонка {idx + 1}")
+    return out[:col_count]
+
+
 def scan_raw_docx(file_path: str) -> Dict[str, Any]:
     doc = Document(file_path)
     tables_out: List[Dict[str, Any]] = []
+    section_titles = _extract_table_section_titles(doc)
 
     for t_idx, table in enumerate(doc.tables):
-        section_title = _find_table_section_title(doc, t_idx)
+        section_title = section_titles.get(t_idx, f"Таблица {t_idx + 1}")
 
         temp_matrix = []
         for r_idx, row in enumerate(table.rows):
@@ -352,9 +493,23 @@ def scan_raw_docx(file_path: str) -> Dict[str, Any]:
 
         table_type = _guess_table_type(temp_matrix)
         header_signature = _build_header_signature(temp_matrix)
-        column_hints = _extract_column_hints(temp_matrix)
+        column_hints = _ensure_column_hints(_extract_column_hints(temp_matrix), col_count)
         has_total_row = any(_row_has_total_label(row) for row in temp_matrix)
         loop_template_row_index = _extract_loop_template_row_index(temp_matrix)
+
+        stable_section_key = _build_stable_section_key(section_title)
+        stable_structure_key = _build_stable_structure_key(
+            table_type=table_type,
+            header_signature=header_signature,
+            column_hints=column_hints,
+            col_count=col_count,
+        )
+        stable_table_key = _build_stable_table_key(
+            stable_section_key=stable_section_key,
+            stable_structure_key=stable_structure_key,
+            table_type=table_type,
+        )
+        stable_column_keys = _build_stable_column_keys(column_hints)
 
         table_fingerprint = _build_table_fingerprint(
             section_title=section_title,
@@ -367,6 +522,10 @@ def scan_raw_docx(file_path: str) -> Dict[str, Any]:
             table_type=table_type,
             header_signature=header_signature,
             column_hints=column_hints,
+            stable_section_key=stable_section_key,
+            stable_structure_key=stable_structure_key,
+            stable_table_key=stable_table_key,
+            stable_column_keys=stable_column_keys,
             row_count=row_count,
             col_count=col_count,
             has_total_row=has_total_row,
@@ -378,6 +537,8 @@ def scan_raw_docx(file_path: str) -> Dict[str, Any]:
             section_title=section_title,
             table_type=table_type,
             header_signature=header_signature,
+            stable_table_key=stable_table_key,
+            stable_column_keys=stable_column_keys,
         )
 
         editable_cells = _collect_editable_cells(matrix)
@@ -393,6 +554,10 @@ def scan_raw_docx(file_path: str) -> Dict[str, Any]:
             "has_total_row": has_total_row,
             "loop_template_row_index": loop_template_row_index,
             "column_hints": column_hints,
+            "stable_section_key": stable_section_key,
+            "stable_structure_key": stable_structure_key,
+            "stable_table_key": stable_table_key,
+            "stable_column_keys": stable_column_keys,
             "editable_cells_count": len(editable_cells),
             "prefilled_cells_count": len(prefilled_cells),
             "table_fingerprint": table_fingerprint,
