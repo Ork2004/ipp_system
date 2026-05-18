@@ -11,6 +11,91 @@ from backend.app.api.auth_api import require_roles
 router = APIRouter(prefix="/excel", tags=["Excel"])
 
 
+def _normalize_text(value: object) -> str:
+    return " ".join(str(value or "").split()).strip().lower()
+
+
+def _check_department_access(user: dict, department_id: int):
+    token_dep = user.get("department_id")
+    if user.get("role") not in ("admin", "teacher"):
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    if not token_dep or int(token_dep) != int(department_id):
+        raise HTTPException(status_code=403, detail="Нельзя смотреть другую кафедру")
+
+
+def _get_excel_template_meta(cur, excel_template_id: int) -> dict:
+    cur.execute(
+        """
+        SELECT id, department_id, academic_year
+        FROM excel_templates
+        WHERE id = %s;
+        """,
+        (excel_template_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Excel template не найден")
+    return {"id": row[0], "department_id": row[1], "academic_year": row[2]}
+
+
+def _get_teacher_name(cur, teacher_id: int) -> str:
+    cur.execute("SELECT full_name FROM teachers WHERE id=%s;", (teacher_id,))
+    row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Преподаватель не найден")
+    return row[0] or ""
+
+
+def _get_teacher_header(cur, excel_template_id: int) -> str | None:
+    cur.execute(
+        """
+        SELECT config
+        FROM generation_settings
+        WHERE excel_template_id=%s
+        LIMIT 1;
+        """,
+        (excel_template_id,),
+    )
+    row = cur.fetchone()
+    teacher_col = ((row[0] or {}).get("columns") or {}).get("teacher_col") if row else None
+
+    if teacher_col:
+        cur.execute(
+            """
+            SELECT header_text
+            FROM excel_columns
+            WHERE template_id=%s AND column_name=%s
+            LIMIT 1;
+            """,
+            (excel_template_id, teacher_col),
+        )
+        col_row = cur.fetchone()
+        if col_row:
+            return col_row[0]
+
+    cur.execute(
+        """
+        SELECT header_text
+        FROM excel_columns
+        WHERE template_id=%s
+        ORDER BY position_index;
+        """,
+        (excel_template_id,),
+    )
+    headers = [r[0] for r in cur.fetchall()]
+    candidates = {
+        "фио ппс",
+        "фио преподавателя",
+        "преподаватель",
+        "фио",
+        "оқытушы",
+    }
+    for header in headers:
+        if _normalize_text(header) in candidates:
+            return header
+    return None
+
+
 @router.post("/upload")
 def upload_excel(
     department_id: int = Form(...),
@@ -65,10 +150,8 @@ def upload_excel(
 
 
 @router.get("/templates")
-def list_excel_templates(department_id: int, user=Depends(require_roles("admin"))):
-    admin_dep = user.get("department_id")
-    if not admin_dep or int(department_id) != int(admin_dep):
-        raise HTTPException(status_code=403, detail="Нельзя смотреть другую кафедру")
+def list_excel_templates(department_id: int, user=Depends(require_roles("admin", "teacher"))):
+    _check_department_access(user, department_id)
 
     conn = get_connection()
     try:
@@ -132,13 +215,17 @@ def download_excel_by_year(department_id: int, academic_year: str, user=Depends(
 
 
 @router.get("/{excel_template_id}/preview")
-def preview_excel(excel_template_id: int, limit: int = 30, offset: int = 0, user=Depends(require_roles("admin"))):
+def preview_excel(
+    excel_template_id: int,
+    limit: int = 30,
+    offset: int = 0,
+    user=Depends(require_roles("admin", "teacher")),
+):
     conn = get_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM excel_templates WHERE id = %s;", (excel_template_id,))
-            if not cur.fetchone():
-                raise HTTPException(status_code=404, detail="Excel template не найден")
+            meta = _get_excel_template_meta(cur, excel_template_id)
+            _check_department_access(user, int(meta["department_id"]))
 
             cur.execute("""
                 SELECT header_text
@@ -148,14 +235,37 @@ def preview_excel(excel_template_id: int, limit: int = 30, offset: int = 0, user
             """, (excel_template_id,))
             headers = [r[0] for r in cur.fetchall()]
 
-            cur.execute("""
-                SELECT row_number, row_data
-                FROM excel_rows
-                WHERE template_id = %s
-                ORDER BY row_number
-                LIMIT %s OFFSET %s;
-            """, (excel_template_id, limit, offset))
-            rows = cur.fetchall()
+            if user.get("role") == "teacher":
+                teacher_id = user.get("teacher_id")
+                if not teacher_id:
+                    raise HTTPException(status_code=403, detail="teacher_id не привязан к аккаунту")
+
+                teacher_name = _normalize_text(_get_teacher_name(cur, int(teacher_id)))
+                teacher_header = _get_teacher_header(cur, excel_template_id)
+                if not teacher_header:
+                    rows = []
+                else:
+                    cur.execute("""
+                        SELECT row_number, row_data
+                        FROM excel_rows
+                        WHERE template_id = %s
+                        ORDER BY row_number;
+                    """, (excel_template_id,))
+                    filtered_rows = [
+                        (rn, rd)
+                        for (rn, rd) in cur.fetchall()
+                        if _normalize_text((rd or {}).get(teacher_header)) == teacher_name
+                    ]
+                    rows = filtered_rows[offset:offset + limit]
+            else:
+                cur.execute("""
+                    SELECT row_number, row_data
+                    FROM excel_rows
+                    WHERE template_id = %s
+                    ORDER BY row_number
+                    LIMIT %s OFFSET %s;
+                """, (excel_template_id, limit, offset))
+                rows = cur.fetchall()
 
         return {
             "excel_template_id": excel_template_id,

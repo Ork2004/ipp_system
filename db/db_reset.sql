@@ -5,11 +5,12 @@
 -- - one Excel per department + year
 -- - one DOCX/raw DOCX per department + year
 -- - generation settings
--- - generation history
+-- - generated files registry
 -- - manual table filling
 -- - carry-over of manual data between years by table structure
 -- ======================================================
 
+DROP TABLE IF EXISTS generated_files CASCADE;
 DROP TABLE IF EXISTS generation_history CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 
@@ -32,8 +33,6 @@ DROP TABLE IF EXISTS docx_templates CASCADE;
 DROP TABLE IF EXISTS excel_rows CASCADE;
 DROP TABLE IF EXISTS excel_columns CASCADE;
 DROP TABLE IF EXISTS excel_templates CASCADE;
-
-DROP TABLE IF EXISTS placeholder_catalog CASCADE;
 
 DROP TABLE IF EXISTS teachers CASCADE;
 DROP TABLE IF EXISTS departments CASCADE;
@@ -60,22 +59,6 @@ CREATE TABLE teachers (
     extra_data JSONB,
 
     CONSTRAINT uq_teacher_dept_name UNIQUE (department_id, full_name)
-);
-
--- =========================
--- PLACEHOLDERS CATALOG (ONLY STABLE)
--- =========================
-CREATE TABLE placeholder_catalog (
-    id BIGSERIAL PRIMARY KEY,
-    placeholder_name TEXT NOT NULL UNIQUE,
-    placeholder_type TEXT NOT NULL,
-    category TEXT NOT NULL,
-    description TEXT,
-    example TEXT,
-    created_at TIMESTAMPTZ DEFAULT now(),
-
-    CONSTRAINT ck_catalog_type CHECK (placeholder_type IN ('text')),
-    CONSTRAINT ck_catalog_cat CHECK (category IN ('teacher'))
 );
 
 -- =========================
@@ -231,6 +214,12 @@ CREATE TABLE raw_docx_tables (
     loop_template_row_index INTEGER,
     column_hints JSONB,
 
+    -- dynamic structure keys, generated from the uploaded file itself
+    stable_section_key TEXT NOT NULL,
+    stable_structure_key TEXT NOT NULL,
+    stable_table_key TEXT NOT NULL,
+    stable_column_keys JSONB,
+
     editable_cells_count INTEGER NOT NULL DEFAULT 0,
     prefilled_cells_count INTEGER NOT NULL DEFAULT 0,
 
@@ -252,6 +241,15 @@ ON raw_docx_tables(template_id);
 
 CREATE INDEX ix_raw_docx_tables_fingerprint
 ON raw_docx_tables(table_fingerprint);
+
+CREATE INDEX ix_raw_docx_tables_stable_section_key
+ON raw_docx_tables(stable_section_key);
+
+CREATE INDEX ix_raw_docx_tables_stable_structure_key
+ON raw_docx_tables(stable_structure_key);
+
+CREATE INDEX ix_raw_docx_tables_stable_table_key
+ON raw_docx_tables(stable_table_key);
 
 CREATE INDEX ix_raw_docx_tables_section_title
 ON raw_docx_tables(section_title);
@@ -275,6 +273,8 @@ CREATE TABLE raw_docx_cells (
 
     -- optional semantic helper fields for future smarter matching
     semantic_key TEXT,
+    stable_cell_key TEXT,
+    stable_column_key TEXT,
     row_signature TEXT,
     column_hint_text TEXT,
 
@@ -290,6 +290,12 @@ ON raw_docx_cells(table_id);
 
 CREATE INDEX ix_raw_docx_cells_semantic_key
 ON raw_docx_cells(semantic_key);
+
+CREATE INDEX ix_raw_docx_cells_stable_cell_key
+ON raw_docx_cells(stable_cell_key);
+
+CREATE INDEX ix_raw_docx_cells_stable_column_key
+ON raw_docx_cells(stable_column_key);
 
 -- =========================
 -- MANUAL DATA SNAPSHOTS
@@ -315,6 +321,10 @@ CREATE TABLE teacher_manual_table_snapshots (
     header_signature TEXT,
     column_hints JSONB,
     table_fingerprint TEXT NOT NULL,
+    stable_section_key TEXT NOT NULL,
+    stable_structure_key TEXT NOT NULL,
+    stable_table_key TEXT NOT NULL,
+    stable_column_keys JSONB,
 
     -- tells whether snapshot was created manually or prefilled from previous year
     source_mode TEXT NOT NULL DEFAULT 'manual', -- manual | prefilled | mixed
@@ -339,6 +349,15 @@ ON teacher_manual_table_snapshots(teacher_id, table_fingerprint);
 CREATE INDEX ix_manual_snapshots_fingerprint
 ON teacher_manual_table_snapshots(table_fingerprint);
 
+CREATE INDEX ix_manual_snapshots_stable_section_key
+ON teacher_manual_table_snapshots(stable_section_key);
+
+CREATE INDEX ix_manual_snapshots_stable_structure_key
+ON teacher_manual_table_snapshots(stable_structure_key);
+
+CREATE INDEX ix_manual_snapshots_stable_table_key
+ON teacher_manual_table_snapshots(stable_table_key);
+
 CREATE INDEX ix_manual_snapshots_section_type
 ON teacher_manual_table_snapshots(section_title, table_type);
 
@@ -360,6 +379,8 @@ CREATE TABLE teacher_manual_static_cell_values (
 
     cell_key VARCHAR(128),
     semantic_key TEXT,
+    stable_cell_key TEXT,
+    stable_column_key TEXT,
     row_signature TEXT,
     column_hint_text TEXT,
 
@@ -376,6 +397,12 @@ ON teacher_manual_static_cell_values(snapshot_id);
 
 CREATE INDEX ix_manual_static_semantic_key
 ON teacher_manual_static_cell_values(semantic_key);
+
+CREATE INDEX ix_manual_static_stable_cell_key
+ON teacher_manual_static_cell_values(stable_cell_key);
+
+CREATE INDEX ix_manual_static_stable_column_key
+ON teacher_manual_static_cell_values(stable_column_key);
 
 -- =========================
 -- LOOP ROWS
@@ -406,6 +433,7 @@ CREATE TABLE teacher_manual_loop_cell_values (
     col_index INTEGER NOT NULL,
     column_hint_text TEXT,
     semantic_key TEXT,
+    stable_column_key TEXT,
 
     value_text TEXT,
 
@@ -421,42 +449,43 @@ ON teacher_manual_loop_cell_values(loop_row_id);
 CREATE INDEX ix_manual_loop_cells_semantic_key
 ON teacher_manual_loop_cell_values(semantic_key);
 
+CREATE INDEX ix_manual_loop_cells_stable_column_key
+ON teacher_manual_loop_cell_values(stable_column_key);
+
 -- =========================
--- GENERATION HISTORY
+-- GENERATED FILES
 -- =========================
-CREATE TABLE generation_history (
+CREATE TABLE generated_files (
     id BIGSERIAL PRIMARY KEY,
 
-    generated_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-    generated_by_role TEXT NOT NULL,
-    generated_for_teacher_id BIGINT REFERENCES teachers(id) ON DELETE SET NULL,
+    last_generated_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    last_generated_by_role TEXT NOT NULL,
+    generated_for_teacher_id BIGINT NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
 
-    department_id BIGINT REFERENCES departments(id) ON DELETE SET NULL,
+    department_id BIGINT NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
     academic_year TEXT NOT NULL,
 
     excel_template_id BIGINT REFERENCES excel_templates(id) ON DELETE SET NULL,
-    docx_template_id BIGINT REFERENCES docx_templates(id) ON DELETE SET NULL,
+    raw_template_id BIGINT REFERENCES raw_docx_templates(id) ON DELETE SET NULL,
 
-    output_path TEXT,
-    file_name TEXT,
+    output_path TEXT NOT NULL,
+    file_name TEXT NOT NULL,
 
-    status TEXT NOT NULL DEFAULT 'success',
-    error_text TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    created_at TIMESTAMPTZ DEFAULT now(),
-
-    CONSTRAINT ck_gen_hist_role CHECK (generated_by_role IN ('admin','teacher')),
-    CONSTRAINT ck_gen_hist_status CHECK (status IN ('success','error'))
+    CONSTRAINT uq_generated_file_teacher_year UNIQUE (generated_for_teacher_id, academic_year),
+    CONSTRAINT ck_generated_file_role CHECK (last_generated_by_role IN ('admin','teacher'))
 );
 
-CREATE INDEX ix_gen_hist_for_teacher_time
-ON generation_history(generated_for_teacher_id, created_at DESC);
+CREATE INDEX ix_generated_files_teacher_year
+ON generated_files(generated_for_teacher_id, academic_year);
 
-CREATE INDEX ix_gen_hist_by_user_time
-ON generation_history(generated_by_user_id, created_at DESC);
+CREATE INDEX ix_generated_files_department_year
+ON generated_files(department_id, academic_year);
 
-CREATE INDEX ix_gen_hist_department_time
-ON generation_history(department_id, created_at DESC);
+CREATE INDEX ix_generated_files_last_user_time
+ON generated_files(last_generated_by_user_id, updated_at DESC);
 
 -- =========================
 -- FORM 63 TEMPLATES
@@ -550,17 +579,3 @@ VALUES (
     'guest'
 );
 
--- stable teacher placeholders
-INSERT INTO placeholder_catalog (
-    placeholder_name,
-    placeholder_type,
-    category,
-    description,
-    example
-) VALUES
-('teacher.staff_type',      'text', 'teacher', 'Тип ставки/штатности', '{{ teacher.staff_type }}'),
-('teacher.position',        'text', 'teacher', 'Должность',            '{{ teacher.position }}'),
-('teacher.academic_degree', 'text', 'teacher', 'Учёная степень',       '{{ teacher.academic_degree }}'),
-('teacher.full_name',       'text', 'teacher', 'ФИО преподавателя',    '{{ teacher.full_name }}'),
-('teacher.department',      'text', 'teacher', 'Кафедра',              '{{ teacher.department }}'),
-('teacher.faculty',         'text', 'teacher', 'Факультет',            '{{ teacher.faculty }}');

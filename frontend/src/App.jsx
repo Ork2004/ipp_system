@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Navbar from "./components/Navbar";
 
+import HomePage from "./pages/HomePage";
 import LoginPage from "./pages/LoginPage";
 import ExcelUploadPage from "./pages/ExcelUploadPage";
 import WorkloadDataPage from "./pages/WorkloadDataPage";
@@ -9,21 +10,32 @@ import GeneratePage from "./pages/GeneratePage";
 import RawTemplateUploadPage from "./pages/RawTemplateUploadPage";
 import ManualTablesPage from "./pages/ManualTablesPage";
 import Form63Page from "./pages/Form63Page";
+import AnalysisPage from "./pages/AnalysisPage"; // ✅ ДОБАВИЛИ
+
+import { getRole, getToken } from "./session";
+
+/* ================= GUARDS ================= */
 
 function RequireAuth({ children }) {
-  const token = localStorage.getItem("token");
+  if (!getToken()) return <Navigate to="/login" replace />;
+  return children;
+}
+
+function RequireRoles({ roles, children }) {
+  const token = getToken();
+  const role = getRole();
+
   if (!token) return <Navigate to="/login" replace />;
+  if (!roles.includes(role)) return <Navigate to="/home" replace />;
+
   return children;
 }
 
 function RequireAdmin({ children }) {
-  const token = localStorage.getItem("token");
-  const role = localStorage.getItem("role");
-
-  if (!token) return <Navigate to="/login" replace />;
-  if (role !== "admin") return <Navigate to="/generate" replace />;
-  return children;
+  return <RequireRoles roles={["admin"]}>{children}</RequireRoles>;
 }
+
+/* ================= APP ================= */
 
 export default function App() {
   return (
@@ -31,33 +43,38 @@ export default function App() {
       <Navbar />
 
       <Routes>
+        {/* AUTH */}
         <Route path="/login" element={<LoginPage />} />
 
-        <Route path="/" element={<Navigate to="/generate" replace />} />
+        {/* REDIRECT */}
+        <Route path="/" element={<Navigate to="/home" replace />} />
 
+        {/* HOME */}
         <Route
-          path="/generate"
+          path="/home"
           element={
             <RequireAuth>
-              <GeneratePage />
+              <HomePage />
             </RequireAuth>
           }
         />
 
+        {/* GENERATE */}
+        <Route
+          path="/generate"
+          element={
+            <RequireRoles roles={["admin", "teacher"]}>
+              <GeneratePage />
+            </RequireRoles>
+          }
+        />
+
+        {/* ADMIN ONLY */}
         <Route
           path="/excel-upload"
           element={
             <RequireAdmin>
               <ExcelUploadPage />
-            </RequireAdmin>
-          }
-        />
-
-        <Route
-          path="/workload-data"
-          element={
-            <RequireAdmin>
-              <WorkloadDataPage />
             </RequireAdmin>
           }
         />
@@ -80,26 +97,46 @@ export default function App() {
           }
         />
 
+        {/* SHARED */}
         <Route
-          path="/manual-tables"
+          path="/workload-data"
           element={
-            <RequireAdmin>
-              <ManualTablesPage />
-            </RequireAdmin>
+            <RequireRoles roles={["admin", "teacher"]}>
+              <WorkloadDataPage />
+            </RequireRoles>
           }
         />
 
+        <Route
+          path="/manual-tables"
+          element={
+            <RequireRoles roles={["admin", "teacher"]}>
+              <ManualTablesPage />
+            </RequireRoles>
+          }
+        />
 
         <Route
           path="/form63"
           element={
-            <RequireAdmin>
+            <RequireRoles roles={["admin", "teacher"]}>
               <Form63Page />
-            </RequireAdmin>
+            </RequireRoles>
           }
         />
 
-        <Route path="*" element={<Navigate to="/generate" replace />} />
+        {/* 🔥 NEW ANALYSIS PAGE */}
+        <Route
+          path="/analysis"
+          element={
+            <RequireRoles roles={["admin"]}>
+              <AnalysisPage />
+            </RequireRoles>
+          }
+        />
+
+        {/* FALLBACK */}
+        <Route path="*" element={<Navigate to="/home" replace />} />
       </Routes>
     </BrowserRouter>
   );

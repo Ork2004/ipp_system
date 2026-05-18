@@ -77,13 +77,17 @@ def store_raw_docx_template(
                             has_total_row,
                             loop_template_row_index,
                             column_hints,
+                            stable_section_key,
+                            stable_structure_key,
+                            stable_table_key,
+                            stable_column_keys,
                             editable_cells_count,
                             prefilled_cells_count,
                             table_fingerprint,
                             structure_meta,
                             extra_meta
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING id;
                         """,
                         (
@@ -97,6 +101,10 @@ def store_raw_docx_template(
                             table_item.get("has_total_row", False),
                             table_item.get("loop_template_row_index"),
                             Json(table_item.get("column_hints", [])),
+                            table_item.get("stable_section_key"),
+                            table_item.get("stable_structure_key"),
+                            table_item.get("stable_table_key"),
+                            Json(table_item.get("stable_column_keys", [])),
                             table_item.get("editable_cells_count", 0),
                             table_item.get("prefilled_cells_count", 0),
                             table_item.get("table_fingerprint"),
@@ -127,11 +135,13 @@ def store_raw_docx_template(
                                     is_editable,
                                     cell_kind,
                                     semantic_key,
+                                    stable_cell_key,
+                                    stable_column_key,
                                     row_signature,
                                     column_hint_text,
                                     extra_meta
                                 )
-                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
                                 """,
                                 (
                                     raw_table_id,
@@ -144,6 +154,8 @@ def store_raw_docx_template(
                                     cell.get("editable", False),
                                     cell.get("cell_kind", "text"),
                                     cell.get("semantic_key"),
+                                    cell.get("stable_cell_key"),
+                                    cell.get("stable_column_key"),
                                     cell.get("row_signature"),
                                     cell.get("column_hint_text"),
                                     Json({}),
