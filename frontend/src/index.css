@@ -121,7 +121,14 @@ a{
   padding: 11px 12px;
   outline: none;
   background: #fff;
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
+  caret-color: var(--text);
   transition: 140ms ease;
+}
+
+.input::placeholder{
+  color: #7c8aa5;
 }
 
 .input:focus{
@@ -254,6 +261,21 @@ button, input, select, textarea{
 
 @media (prefers-reduced-motion: reduce){
   *{ transition: none !important; transform: none !important; }
+}
+
+@keyframes pulse {
+  from { opacity: 0.55; }
+  to   { opacity: 0.85; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-5px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .btn-danger{

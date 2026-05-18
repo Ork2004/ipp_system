@@ -6,9 +6,18 @@ from backend.app.database import get_connection
 from backend.app.config import DOCX_DIR
 from backend.app.api.auth_api import require_roles
 from backend.app.utils.storage import save_upload_file, safe_resolve_in_dir
+from backend.app.utils.raw_docx_parser import _build_table_fingerprint
 from backend.app.utils.raw_template_store import store_raw_docx_template
 
 router = APIRouter(prefix="/raw-template", tags=["Raw Template"])
+
+
+def _check_department_access(user: dict, department_id: int):
+    token_dep = user.get("department_id")
+    if user.get("role") not in ("admin", "teacher"):
+        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    if not token_dep or int(token_dep) != int(department_id):
+        raise HTTPException(status_code=403, detail="Нельзя смотреть другую кафедру")
 
 
 def _get_raw_template_by_year(cur, department_id: int, academic_year: str):
@@ -81,11 +90,9 @@ def upload_raw_template(
 @router.get("/templates")
 def list_raw_templates(
     department_id: int,
-    user=Depends(require_roles("admin")),
+    user=Depends(require_roles("admin", "teacher")),
 ):
-    admin_dep = user.get("department_id")
-    if not admin_dep or int(department_id) != int(admin_dep):
-        raise HTTPException(status_code=403, detail="Нельзя смотреть другую кафедру")
+    _check_department_access(user, department_id)
 
     conn = get_connection()
     try:
@@ -121,11 +128,9 @@ def list_raw_templates(
 def get_raw_template_by_year(
     department_id: int,
     academic_year: str,
-    user=Depends(require_roles("admin")),
+    user=Depends(require_roles("admin", "teacher")),
 ):
-    admin_dep = user.get("department_id")
-    if not admin_dep or int(department_id) != int(admin_dep):
-        raise HTTPException(status_code=403, detail="Нельзя смотреть другую кафедру")
+    _check_department_access(user, department_id)
 
     conn = get_connection()
     try:
@@ -263,8 +268,14 @@ def get_raw_template_tables(
                     has_total_row,
                     loop_template_row_index,
                     column_hints,
+                    stable_section_key,
+                    stable_structure_key,
+                    stable_table_key,
+                    stable_column_keys,
                     editable_cells_count,
                     prefilled_cells_count,
+                    table_fingerprint,
+                    structure_meta,
                     extra_meta
                 FROM raw_docx_tables
                 WHERE template_id=%s
@@ -289,6 +300,11 @@ def get_raw_template_tables(
                         is_empty,
                         is_editable,
                         cell_kind,
+                        semantic_key,
+                        stable_cell_key,
+                        stable_column_key,
+                        row_signature,
+                        column_hint_text,
                         extra_meta
                     FROM raw_docx_cells
                     WHERE table_id=%s
@@ -310,7 +326,12 @@ def get_raw_template_tables(
                         "is_empty": c[5],
                         "editable": c[6],
                         "cell_kind": c[7],
-                        "extra_meta": c[8],
+                        "semantic_key": c[8],
+                        "stable_cell_key": c[9],
+                        "stable_column_key": c[10],
+                        "row_signature": c[11],
+                        "column_hint_text": c[12],
+                        "extra_meta": c[13],
                     })
 
                 matrix = [matrix_map[k] for k in sorted(matrix_map.keys())]
@@ -326,9 +347,15 @@ def get_raw_template_tables(
                     "has_total_row": t[7],
                     "loop_template_row_index": t[8],
                     "column_hints": t[9] or [],
-                    "editable_cells_count": t[10],
-                    "prefilled_cells_count": t[11],
-                    "extra_meta": t[12] or {},
+                    "stable_section_key": t[10],
+                    "stable_structure_key": t[11],
+                    "stable_table_key": t[12],
+                    "stable_column_keys": t[13] or [],
+                    "editable_cells_count": t[14],
+                    "prefilled_cells_count": t[15],
+                    "table_fingerprint": t[16],
+                    "structure_meta": t[17] or {},
+                    "extra_meta": t[18] or {},
                     "matrix": matrix,
                 })
 
@@ -360,7 +387,7 @@ def update_raw_table_type(
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT t.id, rt.department_id
+                    SELECT t.id, rt.department_id, t.section_title, t.header_signature
                     FROM raw_docx_tables t
                     JOIN raw_docx_templates rt ON rt.id = t.template_id
                     WHERE t.id=%s;
@@ -374,13 +401,20 @@ def update_raw_table_type(
                 if int(row[1]) != int(admin_dep):
                     raise HTTPException(status_code=403, detail="Нельзя менять шаблон другой кафедры")
 
+                next_fingerprint = _build_table_fingerprint(
+                    section_title=row[2] or "",
+                    table_type=new_type,
+                    header_signature=row[3] or "",
+                )
+
                 cur.execute(
                     """
                     UPDATE raw_docx_tables
-                    SET table_type=%s
+                    SET table_type=%s,
+                        table_fingerprint=%s
                     WHERE id=%s;
                     """,
-                    (new_type, raw_table_id),
+                    (new_type, next_fingerprint, raw_table_id),
                 )
 
         return {
