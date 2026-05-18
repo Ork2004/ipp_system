@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { api } from "../api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api, getApiBaseUrl } from "../api";
 
 export default function AnalysisPage() {
   const [teachers, setTeachers] = useState([]);
@@ -7,6 +7,8 @@ export default function AnalysisPage() {
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
+  const [reportSummary, setReportSummary] = useState(null);
+  const [reportStatus, setReportStatus] = useState("");
 
   const [selectedYear, setSelectedYear] = useState(
     localStorage.getItem("academic_year") || "2025-2026"
@@ -24,24 +26,75 @@ export default function AnalysisPage() {
     }).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    loadData();
-  }, [selectedYear, selectedDept]);
-
-  async function loadData() {
+  const loadData = useCallback(async function loadData() {
     try {
       setLoading(true);
       setStatus("");
+      setReportStatus("");
       const params = {};
       if (selectedYear) params.academic_year = selectedYear;
       if (selectedDept) params.department_id = selectedDept;
-      const res = await api.get("/analysis", { params });
+
+      const reportRequest = api
+        .get("/analysis/report-summary", { params })
+        .catch((error) => ({ error, data: null }));
+
+      const [res, reportRes] = await Promise.all([
+        api.get("/analysis", { params }),
+        reportRequest,
+      ]);
+
       setTeachers(res.data || []);
+      if (reportRes.error) {
+        setReportSummary(null);
+        setReportStatus("Сводный report временно недоступен");
+      } else {
+        setReportSummary(reportRes.data || null);
+      }
     } catch (e) {
       setStatus(e?.response?.data?.detail || "Ошибка загрузки");
+      setReportSummary(null);
     } finally {
       setLoading(false);
     }
+  }, [selectedYear, selectedDept]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  function downloadSummaryReport() {
+    if (!selectedYear) {
+      setReportStatus("Выбери учебный год для отчёта");
+      return;
+    }
+    const params = new URLSearchParams();
+    params.set("academic_year", selectedYear);
+    if (selectedDept) params.set("department_id", selectedDept);
+    window.open(
+      `${getApiBaseUrl()}/analysis/summary-report/download?${params.toString()}`,
+      "_blank",
+      "noreferrer"
+    );
+  }
+
+  function downloadTeacherReport(teacherName) {
+    if (!teacherName) return;
+    if (!selectedYear) {
+      setReportStatus("Выбери учебный год для отчета");
+      return;
+    }
+
+    const params = new URLSearchParams();
+    params.set("teacher_name", teacherName);
+    params.set("academic_year", selectedYear);
+    if (selectedDept) params.set("department_id", selectedDept);
+
+    window.open(
+      `${getApiBaseUrl()}/analysis/teacher-report/download?${params.toString()}`,
+      "_blank",
+      "noreferrer"
+    );
   }
 
   const stats = useMemo(() => {
@@ -194,12 +247,13 @@ export default function AnalysisPage() {
                 <th style={s.th}>Научные</th>
                 <th style={s.th}>Учебные</th>
                 <th style={s.th}>Всего</th>
+                <th style={s.th}>Отчет</th>
               </tr>
             </thead>
             <tbody>
               {sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={s.empty}>Файлов пока нет</td>
+                  <td colSpan={7} style={s.empty}>Файлов пока нет</td>
                 </tr>
               ) : (
                 sorted.slice(0, 15).map((t, i) => {
@@ -215,6 +269,14 @@ export default function AnalysisPage() {
                       <td style={{ ...s.td, fontWeight: 700, color: "#17356f" }}>
                         {Math.round(t.total || 0)}
                       </td>
+                      <td style={s.td}>
+                        <button
+                          style={s.smallButton}
+                          onClick={() => downloadTeacherReport(t.teacher_name)}
+                        >
+                          DOCX
+                        </button>
+                      </td>
                     </tr>
                   );
                 })
@@ -222,6 +284,173 @@ export default function AnalysisPage() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* SUMMARY REPORT */}
+      <div style={s.sectionTitle}>Сводный отчёт</div>
+
+      <div style={s.reportPanel}>
+        {!reportSummary ? (
+          <div style={s.empty}>
+            {reportStatus || "Сводный отчёт появится после загрузки данных"}
+          </div>
+        ) : (
+          <>
+            {reportStatus && <div style={s.reportStatus}>{reportStatus}</div>}
+
+            {/* Document header */}
+            <div style={s.docCenter}>
+              <div style={s.docTitle}>
+                Сводный отчёт по нагрузке{" "}
+                {(reportSummary.departments || []).join(", ") || "всех кафедр"}
+              </div>
+              <div style={s.docSubtitleCenter}>
+                за {reportSummary.academic_year || "все годы"} учебный год
+              </div>
+            </div>
+
+            <div style={s.docInfoBlock}>
+              <div style={s.docInfoRow}>
+                <span style={s.docInfoLabel}>Количество преподавателей:</span>{" "}
+                <span style={s.docInfoValue}>{reportSummary.teachers_count}</span>
+              </div>
+              <div style={s.docInfoRow}>
+                <span style={s.docInfoLabel}>Кафедра:</span>{" "}
+                <span style={s.docInfoValue}>
+                  {(reportSummary.departments || []).join(", ") || "Все кафедры"}
+                </span>
+              </div>
+            </div>
+
+            <div style={s.docIntro}>
+              За {reportSummary.academic_year} учебный год преподавателями выполнена следующая нагрузка:
+            </div>
+
+            {/* Section 1: Teaching */}
+            <div style={s.docSection}>Учебная работа</div>
+            <div style={s.docItem}>
+              а) Аудиторные учебные часы (лекции, практики):{" "}
+              <strong>{fmtHours(reportSummary.teaching_hours)} ч.</strong>
+            </div>
+            <div style={s.docItem}>
+              б) Прочая учебная нагрузка:{" "}
+              <strong>{fmtHours(reportSummary.other_hours)} ч.</strong>
+            </div>
+            <div style={s.docItem}>
+              в) Средняя нагрузка на преподавателя:{" "}
+              <strong>{fmtHours(reportSummary.average_load)} ч.</strong>
+            </div>
+
+            <div style={{ ...s.docBlockTitle, marginTop: 14 }}>Нагрузка преподавателей:</div>
+            <div style={{ overflowX: "auto", marginBottom: 16 }}>
+              <table style={s.table}>
+                <thead>
+                  <tr style={s.thead}>
+                    <th style={s.th}>№</th>
+                    <th style={s.th}>ФИО</th>
+                    <th style={s.th}>Кафедра</th>
+                    <th style={s.th}>Учебные ч.</th>
+                    <th style={s.th}>Научные ч.</th>
+                    <th style={s.th}>Всего ч.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(reportSummary.top_teachers || []).map((t, i) => (
+                    <tr key={`${t.teacher_name}-${i}`} style={s.tr}>
+                      <td style={{ ...s.td, color: "#aaa" }}>{i + 1}</td>
+                      <td style={{ ...s.td, fontWeight: 600 }}>{t.teacher_name}</td>
+                      <td style={{ ...s.td, color: "#888" }}>{t.department || "—"}</td>
+                      <td style={s.td}>{fmtHours(t.teaching_hours)}</td>
+                      <td style={s.td}>{fmtHours(t.scientific_hours)}</td>
+                      <td style={{ ...s.td, fontWeight: 700, color: "#17356f" }}>
+                        {fmtHours(t.total_hours)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Section 2: Performance check */}
+            <div style={s.docSection}>Учебная работа по проверке успеваемости обучающихся</div>
+            <div style={{ overflowX: "auto", marginBottom: 16 }}>
+              <table style={s.table}>
+                <thead>
+                  <tr style={s.thead}>
+                    <th style={s.th}>Учебная нагрузка</th>
+                    <th style={s.th}>Учебные часы</th>
+                    <th style={s.th}>Научные часы</th>
+                    <th style={s.th}>Всего часов</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style={s.tr}>
+                    <td style={s.td}>За учебный год</td>
+                    <td style={s.td}>{fmtHours(reportSummary.teaching_hours)}</td>
+                    <td style={s.td}>{fmtHours(reportSummary.scientific_hours)}</td>
+                    <td style={{ ...s.td, fontWeight: 700 }}>{fmtHours(reportSummary.total_hours)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* Section 3: Scientific */}
+            <div style={s.docSection}>Научно-исследовательская работа</div>
+            <div style={s.docItem}>
+              а) МООК и онлайн-курсы / НИР:{" "}
+              <strong>{fmtHours(reportSummary.scientific_hours)} ч.</strong>
+            </div>
+            <div style={s.docItem}>б) Список публикаций: заполняется кафедрой.</div>
+            <div style={s.docItem}>в) Участие в научных проектах: заполняется кафедрой.</div>
+
+            {/* Section 4: Final summary */}
+            <div style={s.docSection}>
+              Итоги выполнения нагрузки преподавателей за{" "}
+              {reportSummary.academic_year} учебный год
+            </div>
+            <div style={{ overflowX: "auto", marginBottom: 20 }}>
+              <table style={s.table}>
+                <thead>
+                  <tr style={s.thead}>
+                    <th style={s.th}>№</th>
+                    <th style={s.th}>Виды работ</th>
+                    <th style={s.th}>Всего часов</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { n: "1", label: "Учебная работа / Аудиторная", val: reportSummary.teaching_hours },
+                    { n: "1", label: "Учебная работа / Прочая", val: reportSummary.other_hours },
+                    { n: "2", label: "Учебно-методическая работа", val: 0 },
+                    { n: "3", label: "Научная работа", val: reportSummary.scientific_hours },
+                    { n: "4", label: "Организационно-методическая работа", val: 0 },
+                    { n: "5", label: "Воспитательная, профориентационная и общественная работа", val: 0 },
+                  ].map((row, i) => (
+                    <tr key={i} style={s.tr}>
+                      <td style={{ ...s.td, color: "#aaa" }}>{row.n}</td>
+                      <td style={s.td}>{row.label}</td>
+                      <td style={s.td}>{fmtHours(row.val)}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ ...s.tr, background: "#f8faff" }}>
+                    <td style={s.td} />
+                    <td style={{ ...s.td, fontWeight: 700 }}>Итого</td>
+                    <td style={{ ...s.td, fontWeight: 700, color: "#17356f" }}>
+                      {fmtHours(reportSummary.total_hours)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {/* Download button */}
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button style={s.copyButton} onClick={downloadSummaryReport}>
+                Скачать DOCX
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
     </div>
@@ -235,6 +464,10 @@ function KpiCard({ label, value }) {
       <div style={s.kpiValue}>{value}</div>
     </div>
   );
+}
+
+function fmtHours(value) {
+  return Math.round(Number(value || 0)).toLocaleString("ru-RU");
 }
 
 const s = {
@@ -398,10 +631,113 @@ const s = {
     fontSize: 14,
     color: "#333",
   },
+  smallButton: {
+    height: 34,
+    padding: "0 12px",
+    borderRadius: 10,
+    border: "1px solid #d6e2fb",
+    background: "#f8faff",
+    color: "#17356f",
+    fontSize: 13,
+    fontWeight: 800,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    whiteSpace: "nowrap",
+  },
   empty: {
     textAlign: "center",
     padding: "32px 0",
     color: "#aaa",
     fontSize: 14,
+  },
+  reportPanel: {
+    background: "#fff",
+    borderRadius: 20,
+    padding: "32px 36px",
+    marginBottom: 20,
+    boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
+    border: "1px solid #eef2fb",
+  },
+  copyButton: {
+    height: 42,
+    padding: "0 20px",
+    borderRadius: 12,
+    border: "1px solid #d6e2fb",
+    background: "#f8faff",
+    color: "#17356f",
+    fontSize: 14,
+    fontWeight: 700,
+    cursor: "pointer",
+    fontFamily: "inherit",
+  },
+  reportStatus: {
+    marginBottom: 14,
+    fontSize: 13,
+    color: "#315fcb",
+    fontWeight: 600,
+  },
+  docCenter: {
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  docTitle: {
+    fontSize: 20,
+    fontWeight: 800,
+    color: "#17356f",
+    marginBottom: 4,
+  },
+  docSubtitleCenter: {
+    fontSize: 15,
+    color: "#444",
+    fontWeight: 500,
+  },
+  docInfoBlock: {
+    background: "#f8faff",
+    borderRadius: 12,
+    padding: "14px 18px",
+    marginBottom: 18,
+    border: "1px solid #eef2fb",
+    display: "flex",
+    gap: 32,
+    flexWrap: "wrap",
+  },
+  docInfoRow: {
+    fontSize: 14,
+    color: "#333",
+  },
+  docInfoLabel: {
+    color: "#888",
+    fontWeight: 500,
+  },
+  docInfoValue: {
+    fontWeight: 700,
+    color: "#17356f",
+  },
+  docIntro: {
+    fontSize: 14,
+    color: "#333",
+    marginBottom: 18,
+    fontStyle: "italic",
+  },
+  docSection: {
+    fontSize: 15,
+    fontWeight: 800,
+    color: "#17356f",
+    marginTop: 20,
+    marginBottom: 10,
+    paddingLeft: 10,
+    borderLeft: "3px solid #315fcb",
+  },
+  docItem: {
+    fontSize: 14,
+    color: "#333",
+    marginBottom: 6,
+    paddingLeft: 10,
+  },
+  docBlockTitle: {
+    fontSize: 14,
+    fontWeight: 700,
+    color: "#444",
+    marginBottom: 8,
   },
 };
