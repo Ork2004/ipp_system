@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "PowerShell($py = \"C:\\\\Users\\\\Alikhan\\\\OneDrive\\\\Документы\\\\GitHub\\\\ipp_system\\\\backend\\\\.venv\\\\Scripts\\\\python.exe\"; & $py \"$env:TEMP\\\\dump_out3.py\")"
+    ]
+  }
+}
