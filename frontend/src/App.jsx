@@ -10,6 +10,7 @@ import GeneratePage from "./pages/GeneratePage";
 import RawTemplateUploadPage from "./pages/RawTemplateUploadPage";
 import ManualTablesPage from "./pages/ManualTablesPage";
 import Form63Page from "./pages/Form63Page";
+import Form64Page from "./pages/Form64Page";
 import AnalysisPage from "./pages/AnalysisPage"; // ✅ ДОБАВИЛИ
 
 import { getRole, getToken } from "./session";
@@ -122,6 +123,15 @@ export default function App() {
             <RequireRoles roles={["admin", "teacher"]}>
               <Form63Page />
             </RequireRoles>
+          }
+        />
+
+        <Route
+          path="/form64"
+          element={
+            <RequireAdmin>
+              <Form64Page />
+            </RequireAdmin>
           }
         />
 

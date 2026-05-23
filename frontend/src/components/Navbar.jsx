@@ -10,6 +10,7 @@ const NAV_LINKS_BY_ROLE = {
     { to: "/settings", label: "Настройки" },
     { to: "/manual-tables", label: "Таблицы" },
     { to: "/form63", label: "Форма 63" },
+    { to: "/form64", label: "Форма 64" },
     { to: "/generate", label: "Генерация" },
     { to: "/analysis", label: "Анализ" } // ✅ ДОБАВИЛ
   ],
