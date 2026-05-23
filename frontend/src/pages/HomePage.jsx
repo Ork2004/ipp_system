@@ -101,7 +101,7 @@ export default function HomePage() {
   const [rawTemplates, setRawTemplates] = useState([]);
   const [form64Templates, setForm64Templates] = useState([]);
   const [teachers, setTeachers] = useState([]);
-  const [history, setHistory] = useState([]);
+  const [, setHistory] = useState([]);
 
   const excelForYear = useMemo(
     () => listForYear(excelTemplates, year),
@@ -329,3 +329,4 @@ const subtitleStyle = {
   color: "#6f83a8",
   fontWeight: 700,
 };
+
