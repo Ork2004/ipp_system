@@ -3,6 +3,7 @@ from backend.app.api.blocks_api import router as blocks_router
 from backend.app.api.docx_api import router as docx_router
 from backend.app.api.excel_api import router as excel_router
 from backend.app.api.form63_api import router as form63_router
+from backend.app.api.form64_api import router as form64_router
 from backend.app.api.generate_api import router as generate_router
 from backend.app.api.history_api import router as history_router
 from backend.app.api.manual_fill_api import router as manual_fill_router
@@ -23,6 +24,7 @@ routers = (
     raw_template_router,
     manual_fill_router,
     form63_router,
+    form64_router,
     analysis_router,
 )
 
