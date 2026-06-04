@@ -38,6 +38,7 @@ export default function ExcelUploadPage() {
   const [templates, setTemplates] = useState([]);
   const [loadingList, setLoadingList] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
 
   const currentExcel = useMemo(() => {
     return (
@@ -116,6 +117,7 @@ export default function ExcelUploadPage() {
       localStorage.setItem("academic_year", academicYear);
       setFile(null);
       setStatus("Загружено");
+      setShowSuccess(true);
       loadTemplates(departmentId);
     } catch (e) {
       setStatus(e?.response?.data?.detail || "Ошибка загрузки");
@@ -498,6 +500,86 @@ export default function ExcelUploadPage() {
           </table>
         </div>
       </div>
+
+      {showSuccess && (
+        <div
+          onClick={() => setShowSuccess(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 420,
+              maxWidth: "90vw",
+              background: "#fff",
+              borderRadius: 24,
+              padding: "32px 28px",
+              boxShadow: "0 24px 70px rgba(15,23,42,0.25)",
+              textAlign: "center",
+            }}
+          >
+            <div
+              style={{
+                width: 72,
+                height: 72,
+                borderRadius: "50%",
+                background: "#e7f7ee",
+                color: "#1f9d57",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 38,
+                fontWeight: 800,
+                margin: "0 auto 18px",
+              }}
+            >
+              ✓
+            </div>
+            <div
+              style={{
+                fontSize: 22,
+                fontWeight: 800,
+                color: "#17356f",
+                marginBottom: 8,
+              }}
+            >
+              Успешно загружено
+            </div>
+            <div
+              style={{
+                fontSize: 15,
+                color: "#5f7195",
+                fontWeight: 500,
+                marginBottom: 24,
+              }}
+            >
+              Файл нагрузки успешно загружен.
+            </div>
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowSuccess(false)}
+              style={{
+                minWidth: 140,
+                height: 46,
+                borderRadius: 14,
+                fontWeight: 700,
+                fontSize: 16,
+                boxShadow: "0 12px 24px rgba(58,110,255,0.18)",
+              }}
+            >
+              ОК
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
