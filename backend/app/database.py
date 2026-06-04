@@ -14,7 +14,7 @@ def get_db_config() -> dict:
     return {
         "host": os.getenv("DB_HOST", "localhost"),
         "port": os.getenv("DB_PORT", "5432"),
-        "database": os.getenv("DB_NAME", "ipp_system"),
+        "database": os.getenv("DB_NAME", "ipp"),
         "user": os.getenv("DB_USER", "postgres"),
         "password": os.getenv("DB_PASSWORD", "postgres"),
     }
