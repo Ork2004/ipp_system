@@ -7,6 +7,7 @@ from docx import Document
 
 from backend.app.config import GENERATED_DIR
 from backend.app.database import get_connection
+from backend.app.utils.column_mapping import SUMMARY_TABLE_COLUMN_MAP, suggest_column_map
 from backend.app.utils.manual_docx_filler import apply_manual_fill_to_generated_docx
 from backend.app.utils.performance_summary import render_final_performance_summary
 from backend.app.utils.teaching_load import (
@@ -62,23 +63,6 @@ PAYLOAD_FIELDS = (
     "other_work",
     "itogo",
 )
-SUMMARY_TABLE_COLUMN_MAP = {
-    "l": 1,
-    "spz": 2,
-    "lz": 3,
-    "srsp": 4,
-    "rk_1_2": 5,
-    "ekzameny": 6,
-    "class_hours": 7,
-    "practika": 8,
-    "research_work": 9,
-    "diploma_supervision": 10,
-    "other_work": 11,
-    "office_hours": 12,
-    "itogo": 13,
-}
-
-
 def _normalize_text(value: Any) -> str:
     if value is None:
         return ""
@@ -500,62 +484,6 @@ def _detect_table_blocks(table, raw_table: Dict[str, Any]) -> List[Dict[str, Any
     return blocks
 
 
-def _guess_column_map(raw_table: Dict[str, Any]) -> Dict[str, int]:
-    hints = [str(value).strip().lower() for value in (raw_table.get("column_hints") or [])]
-    out: Dict[str, int] = {}
-
-    for idx, hint in enumerate(hints):
-        if "наименование" in hint or "subject" in hint or "пән" in hint:
-            out["discipline"] = idx
-        elif "образовательная программа" in hint or hint == "оп" or "program" in hint:
-            out["op"] = idx
-        elif "группа" in hint or "group" in hint:
-            out["group"] = idx
-        elif "академ" in hint or "period" in hint:
-            out["academic_period"] = idx
-        elif "курс" in hint or hint == "course":
-            out["course"] = idx
-        elif "кредит" in hint:
-            out["credits"] = idx
-        elif "обуча" in hint or "контингент" in hint or "students" in hint:
-            out["student_count"] = idx
-        elif "лек" in hint:
-            out["l"] = idx
-        elif "практ" in hint:
-            out["spz"] = idx
-        elif "лабор" in hint:
-            out["lz"] = idx
-        elif "срсп" in hint or "сроп" in hint:
-            out["srsp"] = idx
-        elif "рубеж" in hint:
-            out["rk_1_2"] = idx
-        elif "экзам" in hint:
-            out["ekzameny"] = idx
-        elif "практика" in hint:
-            out["practika"] = idx
-        elif "рук-во дп" in hint or "дп и мд" in hint or "диссертац" in hint:
-            out["diploma_supervision"] = idx
-        elif "нирм" in hint or "нирд" in hint:
-            out["research_work"] = idx
-        elif "двр" in hint or "другой" in hint or "дополнительн" in hint:
-            out["other_work"] = idx
-        elif "итого" in hint and "час" in hint:
-            out["itogo"] = idx
-
-    fallback_indexes = {
-        "discipline": 1,
-        "group": 2,
-    }
-
-    for field_key, fallback_index in fallback_indexes.items():
-        if field_key in out:
-            continue
-        if len(hints) > fallback_index:
-            out[field_key] = fallback_index
-
-    return out
-
-
 def _display_value(value: Any) -> Any:
     if value is None:
         return ""
@@ -761,8 +689,10 @@ def _find_teaching_load_summary_row_indexes(table) -> Dict[str, int]:
     return {key: value for key, value in row_indexes.items() if value is not None}
 
 
-def _fill_teaching_load_summary_row(table, row_index: int, payload: Dict[str, Any]) -> None:
-    for field_key, col_index in SUMMARY_TABLE_COLUMN_MAP.items():
+def _fill_teaching_load_summary_row(
+    table, row_index: int, payload: Dict[str, Any], col_map: Optional[Dict[str, int]] = None
+) -> None:
+    for field_key, col_index in (col_map if col_map is not None else SUMMARY_TABLE_COLUMN_MAP).items():
         cell = _safe_get_cell(table, row_index, col_index)
         _set_cell_text(cell, _display_value((payload or {}).get(field_key)))
 
@@ -852,15 +782,38 @@ def _render_teaching_load_summary(
     if not row_indexes:
         return
 
+    col_map = _resolve_persisted_or_guessed_column_map(
+        settings_cfg, role="teaching_load.summary", raw_table=raw_table, kind="summary"
+    )
     summary = build_teaching_load_summary((context.get("teaching_load") or {}), load_kind="staff")
     by_semester = summary.get("by_semester") or {}
 
     if row_indexes.get("1") is not None:
-        _fill_teaching_load_summary_row(table, row_indexes["1"], by_semester.get("1") or {})
+        _fill_teaching_load_summary_row(table, row_indexes["1"], by_semester.get("1") or {}, col_map)
     if row_indexes.get("2") is not None:
-        _fill_teaching_load_summary_row(table, row_indexes["2"], by_semester.get("2") or {})
+        _fill_teaching_load_summary_row(table, row_indexes["2"], by_semester.get("2") or {}, col_map)
     if row_indexes.get("annual") is not None:
-        _fill_teaching_load_summary_row(table, row_indexes["annual"], summary.get("annual") or {})
+        _fill_teaching_load_summary_row(table, row_indexes["annual"], summary.get("annual") or {}, col_map)
+
+
+def _resolve_persisted_or_guessed_column_map(
+    settings_cfg: Dict[str, Any],
+    role: str,
+    raw_table: Dict[str, Any],
+    kind: str,
+) -> Dict[str, int]:
+    """Use the admin-confirmed column map for `role` if it still matches the
+    currently bound raw_table; otherwise fall back to the same auto-guess
+    generation has always used (keeps old generation_settings rows working
+    unchanged until an admin opens the new Settings mapping UI for them).
+    """
+    entry = ((settings_cfg or {}).get("table_column_maps") or {}).get(role)
+    if entry and int(entry.get("raw_table_id") or -1) == int(raw_table.get("id") or -2):
+        persisted_map = entry.get("map") or {}
+        if persisted_map:
+            return {field_key: int(col_index) for field_key, col_index in persisted_map.items()}
+
+    return suggest_column_map(raw_table, kind=kind)
 
 
 def _render_teaching_load_for_kind(
@@ -890,7 +843,9 @@ def _render_teaching_load_for_kind(
     if not blocks:
         return
 
-    col_map = _guess_column_map(raw_table)
+    col_map = _resolve_persisted_or_guessed_column_map(
+        settings_cfg, role=f"teaching_load.{load_kind}", raw_table=raw_table, kind="detail"
+    )
     teaching_load = (context.get("teaching_load") or {})
     load_context = teaching_load.get(load_kind) or {}
     rows_by_scope = load_context.get("rows_by_scope") or {}
