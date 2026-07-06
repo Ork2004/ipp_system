@@ -2,10 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api import routers
+from backend.app.database import close_pool
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="IPP System API")
+    app.add_event_handler("shutdown", close_pool)
 
     app.add_middleware(
         CORSMiddleware,
