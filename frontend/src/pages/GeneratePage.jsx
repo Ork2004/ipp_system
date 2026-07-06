@@ -52,6 +52,7 @@ export default function GeneratePage() {
 
   const [excelTemplates, setExcelTemplates] = useState([]);
   const [rawTemplates, setRawTemplates] = useState([]);
+  const [validation, setValidation] = useState(null);
 
   const years = useMemo(() => {
     const set = new Set();
@@ -131,6 +132,23 @@ export default function GeneratePage() {
     }
   }
 
+  async function loadValidation(depId, year) {
+    if (!depId || !year) {
+      setValidation(null);
+      return;
+    }
+
+    try {
+      const res = await api.get("/settings/validate", {
+        params: { department_id: depId, academic_year: year },
+      });
+      setValidation(res.data);
+    } catch (e) {
+      console.error(e);
+      setValidation(null);
+    }
+  }
+
   async function loadHistory() {
     try {
       setHistStatus("Загрузка файлов...");
@@ -172,6 +190,11 @@ export default function GeneratePage() {
 
     if (!hasRawTemplate) {
       setStatus("Нет raw шаблона для этого года");
+      return;
+    }
+
+    if (validation && !validation.ready) {
+      setStatus("Настройки не готовы к генерации - см. список проблем ниже");
       return;
     }
 
@@ -243,6 +266,10 @@ export default function GeneratePage() {
       loadHistory();
     }
   }, [teacherId, role]);
+
+  useEffect(() => {
+    loadValidation(departmentId, academicYear);
+  }, [departmentId, academicYear]);
 
   return (
     <div
@@ -363,11 +390,59 @@ export default function GeneratePage() {
           {hasRawTemplate ? "есть" : "нет"}
         </div>
 
+        {validation && validation.errors?.length ? (
+          <div
+            style={{
+              marginBottom: 16,
+              padding: "12px 16px",
+              borderRadius: 14,
+              background: "rgba(220,38,38,0.06)",
+              border: "1px solid rgba(220,38,38,0.18)",
+              color: "#b91c1c",
+              fontWeight: 600,
+              fontSize: 14,
+            }}
+          >
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>
+              Генерация невозможна - сначала поправьте настройки:
+            </div>
+            <ul style={{ margin: 0, paddingLeft: 20 }}>
+              {validation.errors.map((err, idx) => (
+                <li key={idx}>{err.message_ru}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {validation && !validation.errors?.length && validation.warnings?.length ? (
+          <div
+            style={{
+              marginBottom: 16,
+              padding: "12px 16px",
+              borderRadius: 14,
+              background: "rgba(180,83,9,0.06)",
+              border: "1px solid rgba(180,83,9,0.18)",
+              color: "#b45309",
+              fontWeight: 600,
+              fontSize: 14,
+            }}
+          >
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>
+              Можно генерировать, но стоит проверить:
+            </div>
+            <ul style={{ margin: 0, paddingLeft: 20 }}>
+              {validation.warnings.map((warn, idx) => (
+                <li key={idx}>{warn.message_ru}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         <div className="actions-row">
           <button
             className="btn btn-primary"
             onClick={generate}
-            disabled={!hasExcel || !hasRawTemplate}
+            disabled={!hasExcel || !hasRawTemplate || (validation ? !validation.ready : false)}
             style={{
               minWidth: 200,
               height: 48,
